@@ -1,90 +1,93 @@
 # ◈ Open Photo Editor
 
-Un éditeur photo open source, léger et moderne, construit avec Flask et Pillow.  
-**Tous les calculs sont effectués en local** — aucune image n'est envoyée vers des services tiers.
+[![Version](https://img.shields.io/badge/version-2.0-yellow?style=flat-square)](https://github.com/CTHE0/Open-Photo-Editor)
+[![Python](https://img.shields.io/badge/python-3.9+-blue?style=flat-square)](https://python.org)
+[![Flask](https://img.shields.io/badge/flask-3.0+-green?style=flat-square)](https://flask.palletsprojects.com)
+[![License](https://img.shields.io/badge/license-MIT-orange?style=flat-square)](LICENSE)
+[![Open Source](https://img.shields.io/badge/open%20source-❤-red?style=flat-square)](https://github.com/CTHE0/Open-Photo-Editor)
 
-![Open Photo Editor](https://img.shields.io/badge/version-1.0-yellow?style=flat-square)
-![Python](https://img.shields.io/badge/python-3.9+-blue?style=flat-square)
-![Flask](https://img.shields.io/badge/flask-3.0+-green?style=flat-square)
-![License](https://img.shields.io/badge/license-MIT-orange?style=flat-square)
+> **Éditeur photo open source** avec retouche simple ET montage multi-calques.  
+> **100% local** — aucune image n'est envoyée vers des services tiers.
 
 ---
 
-## ✨ Fonctionnalités
+## ✨ Deux modes
 
-### Réglages
-- **Luminosité** — de 0 à 200%
-- **Exposition** — correction gamma (−100 à +100)
-- **Contraste** — de 0 à 200%
-- **Hautes lumières** — récupération des zones claires
-- **Ombres** — éclaircissement des zones sombres
-- **Saturation** — de 0 (N&B) à 300%
-- **Température** — correction chaud/froid
-- **Netteté** — de 0 à 300%
+### 🖼 Mode Retouche
+Édition rapide d'une image : réglages, filtres, transformations, export.
+
+### 🎭 Mode Calques (nouveau v2.0)
+Montage photo professionnel avec :
+- **Calques multiples** : image, couleur unie, dégradé, texte
+- **Modes de fusion** : Normal, Multiplier, Écran, Superposition, Lumière douce/dure, Différence, Exclusion, Assombrir, Éclaircir, Esquiver, Densité, Luminosité
+- **Opacité par calque** (0–100%)
+- **Réglages indépendants** par calque (luminosité, contraste, saturation, etc.)
+- **Filtres par calque** (N&B, sépia, vignette, grain, etc.)
+- **Transformations par calque** (rotation, miroir, position X/Y)
+- **Réorganisation** (monter/descendre les calques)
+- **Duplication de calque**
+- **Fusion de calques** (merge)
+- **Aplatissement** (flatten all)
+- **Export final** pleine résolution (JPEG, PNG, WebP)
+
+---
+
+## 🛠 Fonctionnalités détaillées
+
+### Réglages (par image ou par calque)
+| Réglage | Plage |
+|---------|-------|
+| Luminosité | 0–200% |
+| Exposition | −100 à +100 |
+| Contraste | 0–200% |
+| Hautes lumières | −100 à +100 |
+| Ombres | −100 à +100 |
+| Saturation | 0–300% |
+| Température | −100 à +100 |
+| Netteté | 0–300% |
 
 ### Filtres créatifs
-- Noir & Blanc, Sépia, Inversé
-- Auto Contraste, Égalisation
-- Vignette, Flou doux
-- Accentuer, Contours, Embossage
+Noir & Blanc · Sépia · Inversé · Auto Contraste · Égalisation · Vignette · Flou doux · Accentuer · Grain · Embossage
 
-### Transformations
-- Rotation −90° / +90°
-- Miroir horizontal et vertical
-- Recadrage interactif (dessin sur l'image)
-
-### Export
-- JPEG, PNG, WebP
-- Contrôle de la qualité (10–100%)
-- Téléchargement direct dans le navigateur
-
-### UX
-- Glisser-déposer d'images
-- Historique avec 20 étapes (Ctrl+Z)
-- Zoom molette + contrôles (Ctrl +/−/0)
-- Raccourcis clavier (Ctrl+S, Ctrl+O…)
-- Interface réactive et moderne
+### Modes de fusion (calques)
+Normal · Multiplier · Écran · Superposition · Lumière douce · Lumière dure · Différence · Exclusion · Assombrir · Éclaircir · Esquiver couleur · Densité couleur · Luminosité
 
 ---
 
 ## 🚀 Installation
 
 ```bash
-# 1. Cloner le dépôt
-git clone https://github.com/votre-user/open-photo-editor.git
-cd open-photo-editor
+# 1. Cloner
+git clone https://github.com/CTHE0/Open-Photo-Editor.git
+cd Open-Photo-Editor
 
-# 2. Créer un environnement virtuel
+# 2. Environnement virtuel
 python -m venv venv
-source venv/bin/activate   # Windows : venv\Scripts\activate
+source venv/bin/activate     # Windows : venv\Scripts\activate
 
-# 3. Installer les dépendances
+# 3. Dépendances
 pip install -r requirements.txt
 
-# 4. Lancer l'application
+# 4. Lancer
 python app.py
+# → http://localhost:5000
 ```
-
-Ouvrez `http://localhost:5000` dans votre navigateur.
 
 ---
 
-## 📁 Structure du projet
+## 📁 Structure
 
 ```
-open-photo-editor/
-├── app.py                  # Application Flask principale
-├── requirements.txt        # Dépendances Python
+Open-Photo-Editor/
+├── app.py                  # Flask + moteur de composition
+├── requirements.txt
 ├── README.md
 ├── templates/
-│   └── index.html          # Interface unique (SPA-style)
+│   └── index.html          # Interface complète (SPA)
 ├── static/
-│   ├── css/
-│   │   └── style.css       # Styles complets
-│   └── js/
-│       └── editor.js       # Logique frontend
-├── uploads/                # Images originales (temporaire)
-└── processed/              # Images traitées (temporaire)
+│   ├── css/style.css       # Thème sombre industriel
+│   └── js/editor.js        # Logique frontend
+└── uploads/                # Stockage temporaire
 ```
 
 ---
@@ -94,21 +97,49 @@ open-photo-editor/
 | Raccourci | Action |
 |-----------|--------|
 | `Ctrl+O` | Ouvrir une image |
-| `Ctrl+S` | Télécharger |
-| `Ctrl+Z` | Annuler |
+| `Ctrl+S` | Télécharger / Exporter |
+| `Ctrl+Z` | Annuler (mode retouche) |
 | `Ctrl++` | Zoom avant |
 | `Ctrl+-` | Zoom arrière |
 | `Ctrl+0` | Ajuster le zoom |
-| `Échap` | Annuler le recadrage |
+| `Échap` | Annuler recadrage / fermer modal |
+| `Suppr` | Supprimer le calque actif (mode calques) |
 
 ---
 
-## 🛠️ Stack technique
+## 🧱 Stack technique
 
-- **Backend** : Python 3.9+, Flask 3.x
-- **Traitement image** : Pillow (PIL), NumPy
-- **Frontend** : HTML/CSS/JS vanilla (aucun framework)
-- **Fonts** : Fraunces, Instrument Sans, DM Mono (Google Fonts)
+| Couche | Technologie |
+|--------|-------------|
+| Backend | Python 3.9+, Flask 3.x |
+| Traitement image | Pillow (PIL), NumPy |
+| Frontend | HTML/CSS/JS vanilla — zéro framework |
+| Fonts | Fraunces, Instrument Sans, DM Mono |
+
+---
+
+## 🗺 Roadmap
+
+- [ ] Masques de calques
+- [ ] Outil pinceau / dessin
+- [ ] Suppression de fond (AI local)
+- [ ] Import/export de projet (JSON)
+- [ ] Recadrage interactif en mode calques
+- [ ] Support multi-page / timeline
+
+---
+
+## 🤝 Contribution
+
+Les PRs sont les bienvenues ! Ouvrez une issue avant de commencer un gros changement.
+
+```bash
+git checkout -b feature/ma-feature
+# ... développement ...
+git commit -m "feat: ma nouvelle fonctionnalité"
+git push origin feature/ma-feature
+# → Ouvrir une Pull Request
+```
 
 ---
 
@@ -118,5 +149,4 @@ MIT License — libre d'utilisation, modification et distribution.
 
 ---
 
-> Made with ♥ — Open Source, local-first.
-# Open-Photo-Editor
+> Made with ♥ — Open Source, local-first, aucune donnée envoyée nulle part.

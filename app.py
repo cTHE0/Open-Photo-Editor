@@ -1,415 +1,604 @@
 """
-Open Photo Editor - Flask Application
-Open Source photo editing tool with client-friendly local processing
+Open Photo Editor — Flask Application
+Open Source photo editor with layer-based compositing.
+All processing is local — no third-party services.
 """
 
 import os
 import uuid
-import json
-from pathlib import Path
+import copy
+import numpy as np
 from flask import Flask, render_template, request, jsonify, send_file
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageDraw, ImageFont
 import io
 import base64
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024  # 32MB max upload
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024  # 64MB max
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['PROCESSED_FOLDER'] = 'processed'
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff', 'gif'}
+
+# In-memory project store  { project_id: project_dict }
+PROJECTS = {}
+
+# ══════════════════════════════════════════════════════════════
+# IMAGE UTILITIES
+# ══════════════════════════════════════════════════════════════
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def image_to_base64(img, fmt='JPEG'):
-    """Convert PIL Image to base64 string."""
-    buffer = io.BytesIO()
+def image_to_base64(img, fmt='PNG', quality=90):
+    buf = io.BytesIO()
     if fmt == 'JPEG' and img.mode in ('RGBA', 'LA', 'P'):
         img = img.convert('RGB')
-    img.save(buffer, format=fmt, quality=95)
-    buffer.seek(0)
-    return base64.b64encode(buffer.read()).decode('utf-8')
+    kw = {'format': fmt}
+    if fmt in ('JPEG', 'WEBP'):
+        kw['quality'] = quality
+    img.save(buf, **kw)
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode('utf-8')
+
+def base64_to_image(b64str):
+    if b64str.startswith('data:'):
+        b64str = b64str.split(',', 1)[1]
+    return Image.open(io.BytesIO(base64.b64decode(b64str))).convert('RGBA')
+
+# ── Per-layer processing ──────────────────────────────────────
+
+def apply_adjustments(img, adj):
+    alpha = img.split()[3] if img.mode == 'RGBA' else None
+    rgb = img.convert('RGB')
+
+    v = adj.get('brightness', 100) / 100.0
+    if v != 1.0: rgb = ImageEnhance.Brightness(rgb).enhance(v)
+
+    v = adj.get('contrast', 100) / 100.0
+    if v != 1.0: rgb = ImageEnhance.Contrast(rgb).enhance(v)
+
+    v = adj.get('saturation', 100) / 100.0
+    if v != 1.0: rgb = ImageEnhance.Color(rgb).enhance(v)
+
+    v = adj.get('sharpness', 100) / 100.0
+    if v != 1.0: rgb = ImageEnhance.Sharpness(rgb).enhance(v)
+
+    exposure = adj.get('exposure', 0)
+    if exposure != 0:
+        arr = np.array(rgb, np.float32)
+        arr = np.clip(arr * 2 ** (exposure / 100.0), 0, 255).astype(np.uint8)
+        rgb = Image.fromarray(arr)
+
+    hl = adj.get('highlights', 0)
+    sh = adj.get('shadows', 0)
+    if hl != 0 or sh != 0:
+        arr = np.array(rgb, np.float32)
+        lum = 0.299*arr[:,:,0] + 0.587*arr[:,:,1] + 0.114*arr[:,:,2]
+        if hl != 0:
+            arr += hl * (lum/255.0)**2 * np.ones_like(arr)
+        if sh != 0:
+            arr += sh * (1-lum/255.0)**2 * np.ones_like(arr)
+        rgb = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
+
+    temp = adj.get('temperature', 0)
+    if temp != 0:
+        arr = np.array(rgb, np.float32)
+        arr[:,:,0] = np.clip(arr[:,:,0] + temp, 0, 255)
+        arr[:,:,2] = np.clip(arr[:,:,2] - temp, 0, 255)
+        rgb = Image.fromarray(arr.astype(np.uint8))
+
+    result = rgb.convert('RGBA')
+    if alpha:
+        result.putalpha(alpha)
+    return result
+
+def apply_filters(img, filters):
+    if not filters:
+        return img
+    alpha = img.split()[3] if img.mode == 'RGBA' else None
+    rgb = img.convert('RGB')
+
+    for f in filters:
+        if f == 'grayscale':
+            rgb = ImageOps.grayscale(rgb).convert('RGB')
+        elif f == 'sepia':
+            arr = np.array(rgb, np.float32)
+            sepia = np.stack([
+                arr[:,:,0]*0.393+arr[:,:,1]*0.769+arr[:,:,2]*0.189,
+                arr[:,:,0]*0.349+arr[:,:,1]*0.686+arr[:,:,2]*0.168,
+                arr[:,:,0]*0.272+arr[:,:,1]*0.534+arr[:,:,2]*0.131
+            ], axis=2)
+            rgb = Image.fromarray(np.clip(sepia,0,255).astype(np.uint8))
+        elif f == 'blur':
+            rgb = rgb.filter(ImageFilter.GaussianBlur(radius=2))
+        elif f == 'sharpen':
+            rgb = rgb.filter(ImageFilter.SHARPEN)
+        elif f == 'edge_enhance':
+            rgb = rgb.filter(ImageFilter.EDGE_ENHANCE)
+        elif f == 'emboss':
+            rgb = rgb.filter(ImageFilter.EMBOSS)
+        elif f == 'invert':
+            rgb = ImageOps.invert(rgb)
+        elif f == 'auto_contrast':
+            rgb = ImageOps.autocontrast(rgb)
+        elif f == 'equalize':
+            rgb = ImageOps.equalize(rgb)
+        elif f == 'vignette':
+            arr = np.array(rgb, np.float32)
+            h, w = arr.shape[:2]
+            Y, X = np.ogrid[:h, :w]
+            dist = np.sqrt(((X-w/2)/(w/2))**2 + ((Y-h/2)/(h/2))**2)
+            mask = np.clip(1.0-dist*0.65, 0, 1)
+            rgb = Image.fromarray(np.clip(arr*mask[:,:,np.newaxis],0,255).astype(np.uint8))
+        elif f == 'noise':
+            arr = np.array(rgb, np.float32)
+            rgb = Image.fromarray(np.clip(arr+np.random.normal(0,18,arr.shape),0,255).astype(np.uint8))
+
+    result = rgb.convert('RGBA')
+    if alpha:
+        result.putalpha(alpha)
+    return result
+
+def apply_transforms(img, transforms):
+    if transforms.get('flip_horizontal'):
+        img = ImageOps.mirror(img)
+    if transforms.get('flip_vertical'):
+        img = ImageOps.flip(img)
+    rot = transforms.get('rotation', 0)
+    if rot:
+        img = img.rotate(-rot, expand=True, resample=Image.BICUBIC)
+    return img
+
+def apply_crop(img, crop):
+    if not crop:
+        return img
+    x, y = int(crop.get('x',0)), int(crop.get('y',0))
+    w, h = int(crop.get('width',img.width)), int(crop.get('height',img.height))
+    return img.crop((x, y, x+w, y+h))
+
+# ── Blend modes ───────────────────────────────────────────────
+
+def blend_mode(base, over, mode):
+    """Float32 [0-1] arrays, returns blended float32 [0-1]."""
+    b, a = base, over
+    if mode == 'normal':    return a
+    if mode == 'multiply':  return b * a
+    if mode == 'screen':    return 1-(1-b)*(1-a)
+    if mode == 'overlay':   return np.where(b<.5, 2*b*a, 1-2*(1-b)*(1-a))
+    if mode == 'soft_light':
+        return np.where(a<=.5,
+            b-(1-2*a)*b*(1-b),
+            b+(2*a-1)*(np.where(b<=.25,((16*b-12)*b+4)*b,np.sqrt(np.clip(b,0,1)))-b))
+    if mode == 'hard_light': return np.where(a<.5, 2*b*a, 1-2*(1-b)*(1-a))
+    if mode == 'difference': return np.abs(b-a)
+    if mode == 'exclusion':  return b+a-2*b*a
+    if mode == 'darken':     return np.minimum(b, a)
+    if mode == 'lighten':    return np.maximum(b, a)
+    if mode == 'color_dodge':
+        return np.clip(b/np.where(a>=1, 1e-6, 1-a), 0, 1)
+    if mode == 'color_burn':
+        return np.clip(1-(1-b)/np.where(a<=0, 1e-6, a), 0, 1)
+    if mode == 'luminosity':
+        lum_b = (0.299*b[:,:,0]+0.587*b[:,:,1]+0.114*b[:,:,2])[:,:,np.newaxis]
+        lum_a = (0.299*a[:,:,0]+0.587*a[:,:,1]+0.114*a[:,:,2])[:,:,np.newaxis]
+        return np.clip(b + (lum_a-lum_b), 0, 1)
+    return a
+
+# ── Layer renderers ───────────────────────────────────────────
+
+def render_layer_image(layer, canvas_w, canvas_h):
+    b64 = layer.get('image_data', '')
+    if not b64:
+        return Image.new('RGBA', (canvas_w, canvas_h), (0,0,0,0))
+    img = base64_to_image(b64)
+    img = apply_crop(img, layer.get('crop'))
+    img = apply_transforms(img, layer.get('transforms', {}))
+    img = apply_adjustments(img, layer.get('adjustments', {}))
+    img = apply_filters(img, layer.get('filters', []))
+    return img
+
+def render_layer_solid(layer, canvas_w, canvas_h):
+    c = layer.get('color', '#3a3a5c')
+    r, g, b = int(c[1:3],16), int(c[3:5],16), int(c[5:7],16)
+    return Image.new('RGBA', (canvas_w, canvas_h), (r,g,b,255))
+
+def render_layer_gradient(layer, canvas_w, canvas_h):
+    import math
+    c1, c2 = layer.get('color1','#1a1a2e'), layer.get('color2','#e94560')
+    angle = layer.get('angle', 90)
+    r1,g1,b1 = int(c1[1:3],16),int(c1[3:5],16),int(c1[5:7],16)
+    r2,g2,b2 = int(c2[1:3],16),int(c2[3:5],16),int(c2[5:7],16)
+    rad = math.radians(angle)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+    denom = abs(cos_a)*canvas_w + abs(sin_a)*canvas_h + 1e-9
+    y_idx, x_idx = np.mgrid[0:canvas_h, 0:canvas_w]
+    t = np.clip((x_idx*cos_a + y_idx*sin_a) / denom, 0, 1)
+    arr = np.zeros((canvas_h, canvas_w, 4), np.uint8)
+    arr[:,:,0] = np.round(r1 + t*(r2-r1)).astype(np.uint8)
+    arr[:,:,1] = np.round(g1 + t*(g2-g1)).astype(np.uint8)
+    arr[:,:,2] = np.round(b1 + t*(b2-b1)).astype(np.uint8)
+    arr[:,:,3] = 255
+    return Image.fromarray(arr, 'RGBA')
+
+def render_layer_text(layer, canvas_w, canvas_h):
+    img = Image.new('RGBA', (canvas_w, canvas_h), (0,0,0,0))
+    draw = ImageDraw.Draw(img)
+    text = layer.get('text', 'Texte')
+    size = layer.get('font_size', 72)
+    color = layer.get('color', '#ffffff')
+    tx = layer.get('x', 50)
+    ty = layer.get('y', 50)
+    r,g,b = int(color[1:3],16),int(color[3:5],16),int(color[5:7],16)
+    try:
+        font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', size)
+    except Exception:
+        try:
+            font = ImageFont.truetype('/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf', size)
+        except Exception:
+            font = ImageFont.load_default()
+    draw.text((tx, ty), text, font=font, fill=(r,g,b,255))
+    return img
+
+# ── Compositing engine ────────────────────────────────────────
+
+def composite_layers(project, scale=1.0):
+    cw = max(1, int(project['canvas_width'] * scale))
+    ch = max(1, int(project['canvas_height'] * scale))
+    base = np.zeros((ch, cw, 4), np.float32)
+
+    for layer in project.get('layers', []):
+        if not layer.get('visible', True):
+            continue
+
+        ltype = layer.get('type', 'image')
+        opacity = layer.get('opacity', 100) / 100.0
+        bmode   = layer.get('blend_mode', 'normal')
+
+        pw = project['canvas_width']
+        ph = project['canvas_height']
+
+        if   ltype == 'image':    limg = render_layer_image(layer, pw, ph)
+        elif ltype == 'solid':    limg = render_layer_solid(layer, pw, ph)
+        elif ltype == 'gradient': limg = render_layer_gradient(layer, pw, ph)
+        elif ltype == 'text':     limg = render_layer_text(layer, pw, ph)
+        else: continue
+
+        # Position & scale
+        lx = int(layer.get('x', 0) * scale)
+        ly = int(layer.get('y', 0) * scale)
+
+        if scale != 1.0:
+            lw = max(1, int(limg.width * scale))
+            lh = max(1, int(limg.height * scale))
+            limg = limg.resize((lw, lh), Image.LANCZOS)
+
+        # Paste onto full-canvas transparent image
+        paste = Image.new('RGBA', (cw, ch), (0,0,0,0))
+        paste.paste(limg, (lx, ly))
+
+        arr = np.array(paste, np.float32) / 255.0
+        l_rgb   = arr[:,:,:3]
+        l_alpha = arr[:,:,3:4] * opacity
+
+        b_rgb   = base[:,:,:3]
+        b_alpha = base[:,:,3:4]
+
+        blended = blend_mode(b_rgb, l_rgb, bmode)
+        out_alpha = l_alpha + b_alpha * (1 - l_alpha)
+        safe = np.where(out_alpha > 0, out_alpha, 1.0)
+        out_rgb = (blended*l_alpha + b_rgb*b_alpha*(1-l_alpha)) / safe
+
+        base[:,:,:3] = np.clip(out_rgb, 0, 1)
+        base[:,:,3:4] = np.clip(out_alpha, 0, 1)
+
+    return Image.fromarray((base*255).astype(np.uint8), 'RGBA')
+
+def get_scale(project):
+    m = max(project['canvas_width'], project['canvas_height'])
+    return min(1.0, 2048 / m)
+
+def sanitize_layer(l):
+    """Strip heavy image_data from layer dict for JSON responses."""
+    d = {k: v for k, v in l.items() if k != 'image_data'}
+    d['has_image'] = bool(l.get('image_data'))
+    return d
+
+# ══════════════════════════════════════════════════════════════
+# ROUTES
+# ══════════════════════════════════════════════════════════════
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
+# ── Upload ────────────────────────────────────────────────────
 @app.route('/api/upload', methods=['POST'])
 def upload_image():
-    """Handle image upload and return base64 preview."""
     if 'file' not in request.files:
-        return jsonify({'error': 'No file provided'}), 400
-    
+        return jsonify({'error': 'No file'}), 400
     file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
-    
-    if not allowed_file(file.filename):
-        return jsonify({'error': 'File type not supported'}), 400
-    
+    if not file.filename or not allowed_file(file.filename):
+        return jsonify({'error': 'Invalid file'}), 400
+
     file_id = str(uuid.uuid4())
-    ext = file.filename.rsplit('.', 1)[1].lower()
-    
-    img = Image.open(file.stream)
-    original_size = img.size
-    original_mode = img.mode
-    
-    # Save original
-    original_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_original.{ext}")
-    img.save(original_path)
-    
-    # Convert for web preview
-    preview_img = img.copy()
-    if preview_img.mode not in ('RGB', 'RGBA'):
-        preview_img = preview_img.convert('RGB')
-    
-    # Resize for preview if too large
-    max_preview = 2048
-    if max(preview_img.size) > max_preview:
-        preview_img.thumbnail((max_preview, max_preview), Image.LANCZOS)
-    
-    fmt = 'PNG' if img.mode == 'RGBA' else 'JPEG'
-    b64 = image_to_base64(preview_img, fmt)
-    
+    img = Image.open(file.stream).convert('RGBA')
+    w, h = img.size
+
+    path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}.png")
+    img.save(path, 'PNG')
+
+    preview = img.copy()
+    if max(preview.size) > 2048:
+        preview.thumbnail((2048, 2048), Image.LANCZOS)
+
     return jsonify({
         'success': True,
         'file_id': file_id,
-        'original_ext': ext,
-        'width': original_size[0],
-        'height': original_size[1],
-        'mode': original_mode,
-        'preview': f'data:image/{fmt.lower()};base64,{b64}'
+        'width': w,
+        'height': h,
+        'preview': f"data:image/png;base64,{image_to_base64(preview,'PNG')}"
     })
 
-@app.route('/api/process', methods=['POST'])
-def process_image():
-    """Apply edits to image and return result."""
-    data = request.get_json()
-    
-    file_id = data.get('file_id')
-    original_ext = data.get('original_ext', 'jpg')
-    adjustments = data.get('adjustments', {})
-    filters = data.get('filters', [])
-    transforms = data.get('transforms', {})
-    crop = data.get('crop', None)
-    
-    # Load original
-    original_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_original.{original_ext}")
-    if not os.path.exists(original_path):
-        return jsonify({'error': 'Original file not found'}), 404
-    
-    img = Image.open(original_path)
-    
-    # 1. CROP
-    if crop:
-        x = int(crop.get('x', 0))
-        y = int(crop.get('y', 0))
-        w = int(crop.get('width', img.width))
-        h = int(crop.get('height', img.height))
-        img = img.crop((x, y, x + w, y + h))
-    
-    # 2. TRANSFORMS
-    if transforms.get('flip_horizontal'):
-        img = ImageOps.mirror(img)
-    if transforms.get('flip_vertical'):
-        img = ImageOps.flip(img)
-    
-    rotation = transforms.get('rotation', 0)
-    if rotation != 0:
-        img = img.rotate(-rotation, expand=True, resample=Image.BICUBIC)
-    
-    # 3. ADJUSTMENTS (work on RGB copy)
-    has_alpha = img.mode == 'RGBA'
-    if has_alpha:
-        alpha = img.split()[3]
-        rgb_img = img.convert('RGB')
-    else:
-        rgb_img = img.convert('RGB')
-    
-    # Brightness
-    brightness = adjustments.get('brightness', 100) / 100.0
-    if brightness != 1.0:
-        rgb_img = ImageEnhance.Brightness(rgb_img).enhance(brightness)
-    
-    # Contrast
-    contrast = adjustments.get('contrast', 100) / 100.0
-    if contrast != 1.0:
-        rgb_img = ImageEnhance.Contrast(rgb_img).enhance(contrast)
-    
-    # Saturation
-    saturation = adjustments.get('saturation', 100) / 100.0
-    if saturation != 1.0:
-        rgb_img = ImageEnhance.Color(rgb_img).enhance(saturation)
-    
-    # Sharpness
-    sharpness = adjustments.get('sharpness', 100) / 100.0
-    if sharpness != 1.0:
-        rgb_img = ImageEnhance.Sharpness(rgb_img).enhance(sharpness)
-    
-    # Exposure (gamma correction)
-    exposure = adjustments.get('exposure', 0)
-    if exposure != 0:
-        import numpy as np
-        arr = np.array(rgb_img, dtype=np.float32)
-        factor = 2 ** (exposure / 100.0)
-        arr = np.clip(arr * factor, 0, 255).astype(np.uint8)
-        rgb_img = Image.fromarray(arr)
-    
-    # Highlights & Shadows
-    highlights = adjustments.get('highlights', 0)
-    shadows = adjustments.get('shadows', 0)
-    if highlights != 0 or shadows != 0:
-        import numpy as np
-        arr = np.array(rgb_img, dtype=np.float32)
-        luminance = 0.299 * arr[:,:,0] + 0.587 * arr[:,:,1] + 0.114 * arr[:,:,2]
-        
-        if highlights != 0:
-            mask = (luminance / 255.0) ** 2
-            arr = arr + highlights * mask[:,:,np.newaxis]
-        
-        if shadows != 0:
-            mask = (1.0 - luminance / 255.0) ** 2
-            arr = arr + shadows * mask[:,:,np.newaxis]
-        
-        arr = np.clip(arr, 0, 255).astype(np.uint8)
-        rgb_img = Image.fromarray(arr)
-    
-    # Temperature (warm/cool)
-    temperature = adjustments.get('temperature', 0)
-    if temperature != 0:
-        import numpy as np
-        arr = np.array(rgb_img, dtype=np.float32)
-        arr[:,:,0] = np.clip(arr[:,:,0] + temperature, 0, 255)
-        arr[:,:,2] = np.clip(arr[:,:,2] - temperature, 0, 255)
-        rgb_img = Image.fromarray(arr.astype(np.uint8))
-    
-    # 4. FILTERS
-    for f in filters:
-        if f == 'grayscale':
-            rgb_img = ImageOps.grayscale(rgb_img).convert('RGB')
-        elif f == 'sepia':
-            import numpy as np
-            arr = np.array(rgb_img, dtype=np.float32)
-            r = arr[:,:,0] * 0.393 + arr[:,:,1] * 0.769 + arr[:,:,2] * 0.189
-            g = arr[:,:,0] * 0.349 + arr[:,:,1] * 0.686 + arr[:,:,2] * 0.168
-            b = arr[:,:,0] * 0.272 + arr[:,:,1] * 0.534 + arr[:,:,2] * 0.131
-            sepia = np.stack([r, g, b], axis=2)
-            rgb_img = Image.fromarray(np.clip(sepia, 0, 255).astype(np.uint8))
-        elif f == 'blur':
-            rgb_img = rgb_img.filter(ImageFilter.GaussianBlur(radius=2))
-        elif f == 'sharpen':
-            rgb_img = rgb_img.filter(ImageFilter.SHARPEN)
-        elif f == 'edge_enhance':
-            rgb_img = rgb_img.filter(ImageFilter.EDGE_ENHANCE)
-        elif f == 'emboss':
-            rgb_img = rgb_img.filter(ImageFilter.EMBOSS)
-        elif f == 'invert':
-            rgb_img = ImageOps.invert(rgb_img)
-        elif f == 'auto_contrast':
-            rgb_img = ImageOps.autocontrast(rgb_img)
-        elif f == 'equalize':
-            rgb_img = ImageOps.equalize(rgb_img)
-        elif f == 'vignette':
-            import numpy as np
-            arr = np.array(rgb_img, dtype=np.float32)
-            h, w = arr.shape[:2]
-            Y, X = np.ogrid[:h, :w]
-            cx, cy = w / 2, h / 2
-            dist = np.sqrt(((X - cx) / cx) ** 2 + ((Y - cy) / cy) ** 2)
-            mask = np.clip(1.0 - dist * 0.6, 0, 1)
-            arr = arr * mask[:,:,np.newaxis]
-            rgb_img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
-    
-    # Restore alpha if needed
-    if has_alpha and rgb_img.mode == 'RGB':
-        rgb_img.putalpha(alpha)
-        img = rgb_img
-    else:
-        img = rgb_img
-    
-    # Return base64 preview
-    fmt = 'PNG' if has_alpha else 'JPEG'
-    b64 = image_to_base64(img, fmt)
-    
-    # Save processed version
-    processed_path = os.path.join(app.config['PROCESSED_FOLDER'], f"{file_id}_processed.{original_ext}")
-    if img.mode in ('RGBA', 'LA') and original_ext in ('jpg', 'jpeg'):
-        img.convert('RGB').save(processed_path, quality=95)
-    else:
-        img.save(processed_path, quality=95)
-    
+# ── Create project ────────────────────────────────────────────
+@app.route('/api/project/new', methods=['POST'])
+def new_project():
+    data = request.get_json() or {}
+    project_id = str(uuid.uuid4())
+    PROJECTS[project_id] = {
+        'canvas_width':  data.get('width', 1920),
+        'canvas_height': data.get('height', 1080),
+        'layers': []
+    }
+    return jsonify({'success': True, 'project_id': project_id,
+                    'width': PROJECTS[project_id]['canvas_width'],
+                    'height': PROJECTS[project_id]['canvas_height']})
+
+# ── Add layer ─────────────────────────────────────────────────
+@app.route('/api/project/<pid>/layer/add', methods=['POST'])
+def add_layer(pid):
+    if pid not in PROJECTS: return jsonify({'error': 'Not found'}), 404
+    project = PROJECTS[pid]
+    data    = request.get_json() or {}
+    ltype   = data.get('type', 'image')
+
+    layer = {
+        'id':         str(uuid.uuid4())[:8],
+        'type':       ltype,
+        'name':       data.get('name', f'Calque {len(project["layers"])+1}'),
+        'visible':    True,
+        'opacity':    data.get('opacity', 100),
+        'blend_mode': data.get('blend_mode', 'normal'),
+        'x':          data.get('x', 0),
+        'y':          data.get('y', 0),
+        'adjustments': {'brightness':100,'contrast':100,'saturation':100,
+                        'sharpness':100,'exposure':0,'highlights':0,
+                        'shadows':0,'temperature':0},
+        'filters':    [],
+        'transforms': {'rotation':0,'flip_horizontal':False,'flip_vertical':False},
+        'crop':       None,
+    }
+
+    if ltype == 'image':
+        fid = data.get('file_id')
+        if fid:
+            p = os.path.join(app.config['UPLOAD_FOLDER'], f"{fid}.png")
+            if os.path.exists(p):
+                img = Image.open(p).convert('RGBA')
+                layer['image_data'] = f"data:image/png;base64,{image_to_base64(img,'PNG')}"
+                layer['orig_width']  = img.width
+                layer['orig_height'] = img.height
+                if not project['layers']:
+                    project['canvas_width']  = img.width
+                    project['canvas_height'] = img.height
+        layer.setdefault('image_data', data.get('image_data', ''))
+
+    elif ltype == 'solid':
+        layer['color'] = data.get('color', '#3a3a5c')
+
+    elif ltype == 'gradient':
+        layer['color1'] = data.get('color1', '#1a1a2e')
+        layer['color2'] = data.get('color2', '#e8c547')
+        layer['angle']  = data.get('angle', 135)
+
+    elif ltype == 'text':
+        layer['text']      = data.get('text', 'Votre texte')
+        layer['font_size'] = data.get('font_size', 72)
+        layer['color']     = data.get('color', '#ffffff')
+        layer['x']         = data.get('x', 80)
+        layer['y']         = data.get('y', 80)
+
+    project['layers'].append(layer)
+
+    comp = composite_layers(project, get_scale(project))
     return jsonify({
         'success': True,
-        'preview': f'data:image/{fmt.lower()};base64,{b64}',
-        'width': img.width,
-        'height': img.height
+        'layer': sanitize_layer(layer),
+        'preview': f"data:image/png;base64,{image_to_base64(comp,'PNG')}",
+        'canvas_width':  project['canvas_width'],
+        'canvas_height': project['canvas_height']
+    })
+
+# ── Update layer ──────────────────────────────────────────────
+@app.route('/api/project/<pid>/layer/<lid>/update', methods=['POST'])
+def update_layer(pid, lid):
+    if pid not in PROJECTS: return jsonify({'error': 'Not found'}), 404
+    project = PROJECTS[pid]
+    layer   = next((l for l in project['layers'] if l['id']==lid), None)
+    if not layer: return jsonify({'error': 'Layer not found'}), 404
+
+    data = request.get_json() or {}
+    for field in ['visible','opacity','blend_mode','name','x','y',
+                  'adjustments','filters','transforms','crop',
+                  'color','color1','color2','angle','text','font_size']:
+        if field in data:
+            layer[field] = data[field]
+
+    comp = composite_layers(project, get_scale(project))
+    return jsonify({
+        'success': True,
+        'layer': sanitize_layer(layer),
+        'preview': f"data:image/png;base64,{image_to_base64(comp,'PNG')}"
+    })
+
+# ── Delete layer ──────────────────────────────────────────────
+@app.route('/api/project/<pid>/layer/<lid>/delete', methods=['POST'])
+def delete_layer(pid, lid):
+    if pid not in PROJECTS: return jsonify({'error': 'Not found'}), 404
+    project = PROJECTS[pid]
+    project['layers'] = [l for l in project['layers'] if l['id'] != lid]
+    comp = composite_layers(project, get_scale(project))
+    return jsonify({'success': True,
+                    'preview': f"data:image/png;base64,{image_to_base64(comp,'PNG')}"})
+
+# ── Reorder ───────────────────────────────────────────────────
+@app.route('/api/project/<pid>/layers/reorder', methods=['POST'])
+def reorder_layers(pid):
+    if pid not in PROJECTS: return jsonify({'error': 'Not found'}), 404
+    project = PROJECTS[pid]
+    order   = request.get_json().get('order', [])
+    lmap    = {l['id']: l for l in project['layers']}
+    project['layers'] = [lmap[i] for i in order if i in lmap]
+    comp = composite_layers(project, get_scale(project))
+    return jsonify({'success': True,
+                    'preview': f"data:image/png;base64,{image_to_base64(comp,'PNG')}"})
+
+# ── Duplicate ─────────────────────────────────────────────────
+@app.route('/api/project/<pid>/layer/<lid>/duplicate', methods=['POST'])
+def duplicate_layer(pid, lid):
+    if pid not in PROJECTS: return jsonify({'error': 'Not found'}), 404
+    project = PROJECTS[pid]
+    layer   = next((l for l in project['layers'] if l['id']==lid), None)
+    if not layer: return jsonify({'error': 'Layer not found'}), 404
+
+    nl = copy.deepcopy(layer)
+    nl['id']   = str(uuid.uuid4())[:8]
+    nl['name'] = layer['name'] + ' (copie)'
+    idx = project['layers'].index(layer)
+    project['layers'].insert(idx+1, nl)
+
+    comp = composite_layers(project, get_scale(project))
+    return jsonify({
+        'success': True,
+        'layer': sanitize_layer(nl),
+        'preview': f"data:image/png;base64,{image_to_base64(comp,'PNG')}"
+    })
+
+# ── Merge two layers ──────────────────────────────────────────
+@app.route('/api/project/<pid>/layers/merge', methods=['POST'])
+def merge_layers(pid):
+    if pid not in PROJECTS: return jsonify({'error': 'Not found'}), 404
+    project = PROJECTS[pid]
+    data    = request.get_json() or {}
+    ids     = data.get('layer_ids', [])
+    if len(ids) < 2: return jsonify({'error': 'Need ≥2 layers'}), 400
+
+    # Build a sub-project with only those layers
+    sub = {
+        'canvas_width':  project['canvas_width'],
+        'canvas_height': project['canvas_height'],
+        'layers': [l for l in project['layers'] if l['id'] in ids]
+    }
+    merged_img = composite_layers(sub, 1.0)
+    b64 = image_to_base64(merged_img, 'PNG')
+
+    # Replace layers with merged one
+    first_idx = min(project['layers'].index(l) for l in project['layers'] if l['id'] in ids)
+    project['layers'] = [l for l in project['layers'] if l['id'] not in ids]
+    merged_layer = {
+        'id':   str(uuid.uuid4())[:8],
+        'type': 'image', 'name': 'Calque fusionné',
+        'visible': True, 'opacity': 100, 'blend_mode': 'normal',
+        'x': 0, 'y': 0,
+        'adjustments': {'brightness':100,'contrast':100,'saturation':100,
+                        'sharpness':100,'exposure':0,'highlights':0,'shadows':0,'temperature':0},
+        'filters': [], 'transforms': {'rotation':0,'flip_horizontal':False,'flip_vertical':False},
+        'crop': None,
+        'image_data': f'data:image/png;base64,{b64}',
+        'orig_width':  project['canvas_width'],
+        'orig_height': project['canvas_height'],
+    }
+    project['layers'].insert(first_idx, merged_layer)
+
+    comp = composite_layers(project, get_scale(project))
+    return jsonify({
+        'success': True,
+        'layer': sanitize_layer(merged_layer),
+        'preview': f"data:image/png;base64,{image_to_base64(comp,'PNG')}"
+    })
+
+# ── Export / flatten ──────────────────────────────────────────
+@app.route('/api/project/<pid>/export', methods=['POST'])
+def export_project(pid):
+    if pid not in PROJECTS: return jsonify({'error': 'Not found'}), 404
+    project = PROJECTS[pid]
+    data    = request.get_json() or {}
+    fmt     = data.get('format', 'jpeg').upper()
+    quality = data.get('quality', 95)
+
+    final = composite_layers(project, 1.0)
+    if fmt == 'JPEG': final = final.convert('RGB')
+
+    buf = io.BytesIO()
+    kw = {'format': fmt}
+    if fmt in ('JPEG','WEBP'): kw['quality'] = quality
+    final.save(buf, **kw)
+    buf.seek(0)
+
+    mime = {'JPEG':'image/jpeg','PNG':'image/png','WEBP':'image/webp'}.get(fmt,'image/jpeg')
+    return send_file(buf, mimetype=mime, as_attachment=True,
+                     download_name=f'composition.{fmt.lower()}')
+
+# ── Single image quick process (simple mode) ──────────────────
+@app.route('/api/process', methods=['POST'])
+def process_image():
+    data = request.get_json() or {}
+    fid  = data.get('file_id')
+    path = os.path.join(app.config['UPLOAD_FOLDER'], f"{fid}.png")
+    if not os.path.exists(path):
+        return jsonify({'error': 'File not found'}), 404
+
+    img = Image.open(path).convert('RGBA')
+    if data.get('crop'):    img = apply_crop(img, data['crop'])
+    img = apply_transforms(img, data.get('transforms', {}))
+    img = apply_adjustments(img, data.get('adjustments', {}))
+    img = apply_filters(img, data.get('filters', []))
+
+    preview = img.copy()
+    if max(preview.size) > 2048:
+        preview.thumbnail((2048, 2048), Image.LANCZOS)
+
+    return jsonify({
+        'success': True,
+        'preview': f"data:image/png;base64,{image_to_base64(preview,'PNG')}",
+        'width': img.width, 'height': img.height
     })
 
 @app.route('/api/download', methods=['POST'])
 def download_image():
-    """Download the processed image in chosen format."""
-    data = request.get_json()
-    
-    file_id = data.get('file_id')
-    original_ext = data.get('original_ext', 'jpg')
-    export_format = data.get('format', 'jpeg').lower()
+    data = request.get_json() or {}
+    fid  = data.get('file_id')
+    path = os.path.join(app.config['UPLOAD_FOLDER'], f"{fid}.png")
+    if not os.path.exists(path):
+        return jsonify({'error': 'File not found'}), 404
+
+    img = Image.open(path).convert('RGBA')
+    if data.get('crop'):    img = apply_crop(img, data['crop'])
+    img = apply_transforms(img, data.get('transforms', {}))
+    img = apply_adjustments(img, data.get('adjustments', {}))
+    img = apply_filters(img, data.get('filters', []))
+
+    fmt = data.get('format', 'jpeg').upper()
     quality = data.get('quality', 95)
-    adjustments = data.get('adjustments', {})
-    filters = data.get('filters', [])
-    transforms = data.get('transforms', {})
-    crop = data.get('crop', None)
-    
-    # Re-process original at full resolution
-    original_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}_original.{original_ext}")
-    if not os.path.exists(original_path):
-        return jsonify({'error': 'Original file not found'}), 404
-    
-    # Call process logic inline
-    process_request = app.test_request_context(
-        '/api/process',
-        method='POST',
-        json={
-            'file_id': file_id,
-            'original_ext': original_ext,
-            'adjustments': adjustments,
-            'filters': filters,
-            'transforms': transforms,
-            'crop': crop
-        }
-    )
-    
-    # Reload and reprocess
-    img = Image.open(original_path)
-    
-    if crop:
-        x = int(crop.get('x', 0)); y = int(crop.get('y', 0))
-        w = int(crop.get('width', img.width)); h = int(crop.get('height', img.height))
-        img = img.crop((x, y, x + w, y + h))
-    
-    if transforms.get('flip_horizontal'):
-        img = ImageOps.mirror(img)
-    if transforms.get('flip_vertical'):
-        img = ImageOps.flip(img)
-    rotation = transforms.get('rotation', 0)
-    if rotation != 0:
-        img = img.rotate(-rotation, expand=True, resample=Image.BICUBIC)
-    
-    has_alpha = img.mode == 'RGBA'
-    if has_alpha:
-        alpha = img.split()[3]
-    rgb_img = img.convert('RGB')
-    
-    brightness = adjustments.get('brightness', 100) / 100.0
-    if brightness != 1.0:
-        rgb_img = ImageEnhance.Brightness(rgb_img).enhance(brightness)
-    contrast = adjustments.get('contrast', 100) / 100.0
-    if contrast != 1.0:
-        rgb_img = ImageEnhance.Contrast(rgb_img).enhance(contrast)
-    saturation = adjustments.get('saturation', 100) / 100.0
-    if saturation != 1.0:
-        rgb_img = ImageEnhance.Color(rgb_img).enhance(saturation)
-    sharpness = adjustments.get('sharpness', 100) / 100.0
-    if sharpness != 1.0:
-        rgb_img = ImageEnhance.Sharpness(rgb_img).enhance(sharpness)
-    
-    exposure = adjustments.get('exposure', 0)
-    if exposure != 0:
-        import numpy as np
-        arr = np.array(rgb_img, dtype=np.float32)
-        factor = 2 ** (exposure / 100.0)
-        arr = np.clip(arr * factor, 0, 255).astype(np.uint8)
-        rgb_img = Image.fromarray(arr)
-    
-    highlights = adjustments.get('highlights', 0)
-    shadows = adjustments.get('shadows', 0)
-    if highlights != 0 or shadows != 0:
-        import numpy as np
-        arr = np.array(rgb_img, dtype=np.float32)
-        luminance = 0.299 * arr[:,:,0] + 0.587 * arr[:,:,1] + 0.114 * arr[:,:,2]
-        if highlights != 0:
-            mask = (luminance / 255.0) ** 2
-            arr = arr + highlights * mask[:,:,np.newaxis]
-        if shadows != 0:
-            mask = (1.0 - luminance / 255.0) ** 2
-            arr = arr + shadows * mask[:,:,np.newaxis]
-        arr = np.clip(arr, 0, 255).astype(np.uint8)
-        rgb_img = Image.fromarray(arr)
-    
-    temperature = adjustments.get('temperature', 0)
-    if temperature != 0:
-        import numpy as np
-        arr = np.array(rgb_img, dtype=np.float32)
-        arr[:,:,0] = np.clip(arr[:,:,0] + temperature, 0, 255)
-        arr[:,:,2] = np.clip(arr[:,:,2] - temperature, 0, 255)
-        rgb_img = Image.fromarray(arr.astype(np.uint8))
-    
-    for f in filters:
-        if f == 'grayscale':
-            rgb_img = ImageOps.grayscale(rgb_img).convert('RGB')
-        elif f == 'sepia':
-            import numpy as np
-            arr = np.array(rgb_img, dtype=np.float32)
-            r = arr[:,:,0]*0.393 + arr[:,:,1]*0.769 + arr[:,:,2]*0.189
-            g = arr[:,:,0]*0.349 + arr[:,:,1]*0.686 + arr[:,:,2]*0.168
-            b = arr[:,:,0]*0.272 + arr[:,:,1]*0.534 + arr[:,:,2]*0.131
-            rgb_img = Image.fromarray(np.clip(np.stack([r,g,b],axis=2),0,255).astype(np.uint8))
-        elif f == 'blur':
-            rgb_img = rgb_img.filter(ImageFilter.GaussianBlur(radius=2))
-        elif f == 'sharpen':
-            rgb_img = rgb_img.filter(ImageFilter.SHARPEN)
-        elif f == 'edge_enhance':
-            rgb_img = rgb_img.filter(ImageFilter.EDGE_ENHANCE)
-        elif f == 'emboss':
-            rgb_img = rgb_img.filter(ImageFilter.EMBOSS)
-        elif f == 'invert':
-            rgb_img = ImageOps.invert(rgb_img)
-        elif f == 'auto_contrast':
-            rgb_img = ImageOps.autocontrast(rgb_img)
-        elif f == 'equalize':
-            rgb_img = ImageOps.equalize(rgb_img)
-        elif f == 'vignette':
-            import numpy as np
-            arr = np.array(rgb_img, dtype=np.float32)
-            h, w = arr.shape[:2]
-            Y, X = np.ogrid[:h, :w]
-            cx, cy = w/2, h/2
-            dist = np.sqrt(((X-cx)/cx)**2 + ((Y-cy)/cy)**2)
-            mask = np.clip(1.0 - dist*0.6, 0, 1)
-            arr = arr * mask[:,:,np.newaxis]
-            rgb_img = Image.fromarray(np.clip(arr,0,255).astype(np.uint8))
-    
-    if has_alpha and export_format == 'png':
-        rgb_img.putalpha(alpha)
-        final_img = rgb_img
-    else:
-        final_img = rgb_img
-    
-    # Save to buffer
-    buffer = io.BytesIO()
-    fmt_map = {'jpeg': 'JPEG', 'jpg': 'JPEG', 'png': 'PNG', 'webp': 'WEBP'}
-    pil_fmt = fmt_map.get(export_format, 'JPEG')
-    
-    if pil_fmt == 'JPEG' and final_img.mode in ('RGBA', 'P'):
-        final_img = final_img.convert('RGB')
-    
-    save_kwargs = {'format': pil_fmt}
-    if pil_fmt in ('JPEG', 'WEBP'):
-        save_kwargs['quality'] = quality
-    
-    final_img.save(buffer, **save_kwargs)
-    buffer.seek(0)
-    
-    mime_map = {'JPEG': 'image/jpeg', 'PNG': 'image/png', 'WEBP': 'image/webp'}
-    
-    return send_file(
-        buffer,
-        mimetype=mime_map.get(pil_fmt, 'image/jpeg'),
-        as_attachment=True,
-        download_name=f'edited_photo.{export_format}'
-    )
+    if fmt == 'JPEG': img = img.convert('RGB')
+
+    buf = io.BytesIO()
+    img.save(buf, format=fmt, quality=quality)
+    buf.seek(0)
+
+    mime = {'JPEG':'image/jpeg','PNG':'image/png','WEBP':'image/webp'}.get(fmt,'image/jpeg')
+    return send_file(buf, mimetype=mime, as_attachment=True,
+                     download_name=f'edited.{fmt.lower()}')
 
 if __name__ == '__main__':
     os.makedirs('uploads', exist_ok=True)
-    os.makedirs('processed', exist_ok=True)
     app.run(debug=True, host='0.0.0.0', port=5000)

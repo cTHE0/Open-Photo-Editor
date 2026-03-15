@@ -1,344 +1,485 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>Open Photo Editor</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:opsz,wght@9..144,300;9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}"/>
 </head>
 <body>
-  <!-- HEADER -->
-  <header class="header">
-    <div class="header-logo">
-      <span class="logo-icon">◈</span>
-      <span class="logo-text">Open Photo<em>Editor</em></span>
+
+<!-- ── HEADER ──────────────────────────────────────────────── -->
+<header class="header">
+  <div class="header-logo">
+    <span class="logo-icon">◈</span>
+    <span class="logo-text">Open Photo<em>Editor</em></span>
+  </div>
+
+  <!-- MODE SWITCHER -->
+  <div class="mode-switcher">
+    <button class="mode-btn active" id="modeSimple" title="Mode retouche simple">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      Retouche
+    </button>
+    <button class="mode-btn" id="modeCompose" title="Mode calques / montage">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+      Calques
+    </button>
+  </div>
+
+  <nav class="header-nav">
+    <a href="https://github.com/CTHE0/Open-Photo-Editor" target="_blank" class="nav-link">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
+      GitHub
+    </a>
+    <span class="nav-badge">v2.0</span>
+  </nav>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- SIMPLE MODE                                                -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<main class="app" id="appSimple">
+
+  <!-- LEFT: Tools -->
+  <aside class="panel panel-left">
+    <div class="panel-section">
+      <h3 class="section-title">Fichier</h3>
+      <label class="btn-upload" id="uploadBtnSimple">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Ouvrir une image
+        <input type="file" id="fileInputSimple" accept="image/*" hidden/>
+      </label>
     </div>
-    <nav class="header-nav">
-      <a href="https://github.com/CTHE0/Open-Photo-Editor" target="_blank" class="nav-link">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/></svg>
-        Open Source
-      </a>
-      <span class="nav-badge">v1.0</span>
-    </nav>
-  </header>
 
-  <!-- MAIN APP -->
-  <main class="app">
+    <div class="tabs">
+      <button class="tab active" data-tab="adjust">Réglages</button>
+      <button class="tab" data-tab="filters">Filtres</button>
+      <button class="tab" data-tab="transform">Transformer</button>
+    </div>
 
-    <!-- LEFT PANEL: Tools -->
-    <aside class="panel panel-left" id="leftPanel">
+    <!-- ADJUST -->
+    <div class="tab-content active" id="tab-adjust">
       <div class="panel-section">
-        <h3 class="section-title">Fichier</h3>
-        <label class="btn-upload" id="uploadBtn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          Ouvrir une image
-          <input type="file" id="fileInput" accept="image/*" hidden />
+        <h3 class="section-title">Lumière</h3>
+        <div class="sliders">
+          <div class="slider-row"><label>Luminosité</label><div class="slider-wrap"><input type="range" class="slider" id="s_brightness" data-param="brightness" min="0" max="200" value="100"/><span class="slider-val" id="v_brightness">100</span></div></div>
+          <div class="slider-row"><label>Exposition</label><div class="slider-wrap"><input type="range" class="slider" id="s_exposure" data-param="exposure" min="-100" max="100" value="0"/><span class="slider-val" id="v_exposure">0</span></div></div>
+          <div class="slider-row"><label>Contraste</label><div class="slider-wrap"><input type="range" class="slider" id="s_contrast" data-param="contrast" min="0" max="200" value="100"/><span class="slider-val" id="v_contrast">100</span></div></div>
+          <div class="slider-row"><label>Hautes lumières</label><div class="slider-wrap"><input type="range" class="slider" id="s_highlights" data-param="highlights" min="-100" max="100" value="0"/><span class="slider-val" id="v_highlights">0</span></div></div>
+          <div class="slider-row"><label>Ombres</label><div class="slider-wrap"><input type="range" class="slider" id="s_shadows" data-param="shadows" min="-100" max="100" value="0"/><span class="slider-val" id="v_shadows">0</span></div></div>
+        </div>
+      </div>
+      <div class="panel-section">
+        <h3 class="section-title">Couleur</h3>
+        <div class="sliders">
+          <div class="slider-row"><label>Saturation</label><div class="slider-wrap"><input type="range" class="slider" id="s_saturation" data-param="saturation" min="0" max="300" value="100"/><span class="slider-val" id="v_saturation">100</span></div></div>
+          <div class="slider-row"><label>Température</label><div class="slider-wrap"><input type="range" class="slider" id="s_temperature" data-param="temperature" min="-100" max="100" value="0"/><span class="slider-val" id="v_temperature">0</span></div></div>
+        </div>
+      </div>
+      <div class="panel-section">
+        <h3 class="section-title">Détail</h3>
+        <div class="sliders">
+          <div class="slider-row"><label>Netteté</label><div class="slider-wrap"><input type="range" class="slider" id="s_sharpness" data-param="sharpness" min="0" max="300" value="100"/><span class="slider-val" id="v_sharpness">100</span></div></div>
+        </div>
+      </div>
+      <div class="panel-section">
+        <button class="btn-reset" id="resetAdjBtn">↺ Réinitialiser</button>
+      </div>
+    </div>
+
+    <!-- FILTERS -->
+    <div class="tab-content" id="tab-filters">
+      <div class="panel-section">
+        <h3 class="section-title">Filtres créatifs</h3>
+        <div class="filter-grid">
+          <button class="filter-btn" data-filter="grayscale"><div class="fp grayscale-p"></div><span>Noir &amp; Blanc</span></button>
+          <button class="filter-btn" data-filter="sepia"><div class="fp sepia-p"></div><span>Sépia</span></button>
+          <button class="filter-btn" data-filter="invert"><div class="fp invert-p"></div><span>Inversé</span></button>
+          <button class="filter-btn" data-filter="auto_contrast"><div class="fp auto-p"></div><span>Auto Contraste</span></button>
+          <button class="filter-btn" data-filter="equalize"><div class="fp equalize-p"></div><span>Égaliser</span></button>
+          <button class="filter-btn" data-filter="vignette"><div class="fp vignette-p"></div><span>Vignette</span></button>
+          <button class="filter-btn" data-filter="blur"><div class="fp blur-p"></div><span>Flou doux</span></button>
+          <button class="filter-btn" data-filter="sharpen"><div class="fp sharpen-p"></div><span>Accentuer</span></button>
+          <button class="filter-btn" data-filter="noise"><div class="fp noise-p"></div><span>Grain</span></button>
+          <button class="filter-btn" data-filter="emboss"><div class="fp emboss-p"></div><span>Embossage</span></button>
+        </div>
+        <div class="active-filters" id="simpleActiveFilters">
+          <span class="filters-label">Actifs :</span>
+          <span class="no-filters">Aucun</span>
+        </div>
+        <button class="btn-reset" id="clearFiltersBtn">✕ Enlever les filtres</button>
+      </div>
+    </div>
+
+    <!-- TRANSFORM -->
+    <div class="tab-content" id="tab-transform">
+      <div class="panel-section">
+        <h3 class="section-title">Rotation &amp; Miroir</h3>
+        <div class="transform-btns">
+          <button class="btn-transform" id="rotL">↺ −90°</button>
+          <button class="btn-transform" id="rotR">↻ +90°</button>
+          <button class="btn-transform" id="flipH">↔ Miroir H</button>
+          <button class="btn-transform" id="flipV">↕ Miroir V</button>
+        </div>
+      </div>
+      <div class="panel-section">
+        <h3 class="section-title">Recadrage</h3>
+        <p class="section-hint">Dessinez une zone sur l'image</p>
+        <div class="crop-btns">
+          <button class="btn-transform" id="cropToggleBtn">✂ Activer</button>
+          <button class="btn-transform" id="applyCropBtn" style="display:none">✓ Appliquer</button>
+          <button class="btn-transform" id="cancelCropBtn" style="display:none">✕ Annuler</button>
+        </div>
+      </div>
+      <div class="panel-section">
+        <div class="transform-state">
+          <div class="state-row"><span>Rotation</span><span id="stateRot">0°</span></div>
+          <div class="state-row"><span>Miroir H</span><span id="stateFlipH">Non</span></div>
+          <div class="state-row"><span>Miroir V</span><span id="stateFlipV">Non</span></div>
+        </div>
+        <button class="btn-reset" id="resetTransformBtn">↺ Réinitialiser</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- CENTER: Canvas -->
+  <section class="canvas-area" id="simpleCanvas">
+    <div class="empty-state" id="simpleEmptyState">
+      <div class="empty-icon">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      </div>
+      <h2>Ouvrez une image pour commencer</h2>
+      <p>JPG, PNG, WebP, BMP, TIFF · Glisser-déposer supporté</p>
+      <label class="btn-primary" for="fileInputSimple">Choisir une image</label>
+    </div>
+    <div class="image-wrapper" id="simpleImageWrapper" style="display:none">
+      <div class="crop-overlay" id="cropOverlay" style="display:none">
+        <div class="crop-box" id="cropBox"></div>
+      </div>
+      <img class="main-image" id="simpleImage" src="" alt=""/>
+    </div>
+    <div class="processing" id="simpleProcessing" style="display:none">
+      <div class="spinner"></div><span>Traitement…</span>
+    </div>
+    <div class="info-bar" id="simpleInfoBar" style="display:none">
+      <span id="simpleImgDim">—</span>
+      <span class="info-sep">·</span>
+      <span id="simpleImgMode">—</span>
+      <div class="zoom-controls">
+        <button id="zoomOut">−</button>
+        <span id="zoomLevel">100%</span>
+        <button id="zoomIn">+</button>
+        <button id="zoomFit">Fit</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT: Export -->
+  <aside class="panel panel-right">
+    <div class="panel-section">
+      <h3 class="section-title">Aperçu</h3>
+      <div class="mini-preview" id="simpleMiniPreview"><div class="mini-placeholder">Pas d'image</div></div>
+      <div class="image-info" id="simpleImgInfo" style="display:none">
+        <div class="info-row"><span>Largeur</span><span id="iW">—</span></div>
+        <div class="info-row"><span>Hauteur</span><span id="iH">—</span></div>
+        <div class="info-row"><span>Mode</span><span id="iM">—</span></div>
+      </div>
+    </div>
+    <div class="panel-section">
+      <h3 class="section-title">Exporter</h3>
+      <div class="option-row"><label>Format</label>
+        <select id="simpleExportFmt" class="select">
+          <option value="jpeg">JPEG</option>
+          <option value="png">PNG</option>
+          <option value="webp">WebP</option>
+        </select>
+      </div>
+      <div class="option-row" id="simpleQualityRow">
+        <label>Qualité</label>
+        <div class="slider-wrap">
+          <input type="range" class="slider" id="simpleQuality" min="10" max="100" value="95"/>
+          <span class="slider-val" id="simpleQualVal">95</span>
+        </div>
+      </div>
+      <button class="btn-primary" id="simpleDownloadBtn" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Télécharger
+      </button>
+    </div>
+    <div class="panel-section">
+      <h3 class="section-title">Historique</h3>
+      <div class="history-list" id="historyList"><p class="no-history">Aucune modification</p></div>
+      <button class="btn-reset" id="undoBtn" disabled>↩ Annuler</button>
+    </div>
+    <div class="panel-section">
+      <h3 class="section-title">Passer en montage</h3>
+      <p class="section-hint">Ouvrez cette image dans le mode calques pour créer une composition.</p>
+      <button class="btn-transform" id="sendToComposeBtn" style="width:100%" disabled>
+        → Ouvrir dans Calques
+      </button>
+    </div>
+  </aside>
+</main>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!-- COMPOSE MODE (LAYERS)                                       -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<main class="app" id="appCompose" style="display:none">
+
+  <!-- LEFT: Layer tools -->
+  <aside class="panel panel-left" id="layerToolPanel">
+    <div class="panel-section">
+      <h3 class="section-title">Ajouter un calque</h3>
+      <div class="add-layer-btns">
+        <label class="btn-addlayer" id="addImageLayerBtn" title="Image depuis fichier">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          Image
+          <input type="file" id="addImageInput" accept="image/*" hidden/>
         </label>
-      </div>
-
-      <!-- TABS -->
-      <div class="tabs">
-        <button class="tab active" data-tab="adjust">Réglages</button>
-        <button class="tab" data-tab="filters">Filtres</button>
-        <button class="tab" data-tab="transform">Transformer</button>
-      </div>
-
-      <!-- ADJUST TAB -->
-      <div class="tab-content active" id="tab-adjust">
-        <div class="panel-section">
-          <h3 class="section-title">Lumière</h3>
-          <div class="sliders">
-            <div class="slider-row">
-              <label>Luminosité</label>
-              <div class="slider-wrap">
-                <input type="range" class="slider" id="brightness" min="0" max="200" value="100" data-param="brightness" />
-                <span class="slider-val" id="brightness-val">100</span>
-              </div>
-            </div>
-            <div class="slider-row">
-              <label>Exposition</label>
-              <div class="slider-wrap">
-                <input type="range" class="slider" id="exposure" min="-100" max="100" value="0" data-param="exposure" />
-                <span class="slider-val" id="exposure-val">0</span>
-              </div>
-            </div>
-            <div class="slider-row">
-              <label>Contraste</label>
-              <div class="slider-wrap">
-                <input type="range" class="slider" id="contrast" min="0" max="200" value="100" data-param="contrast" />
-                <span class="slider-val" id="contrast-val">100</span>
-              </div>
-            </div>
-            <div class="slider-row">
-              <label>Hautes lumières</label>
-              <div class="slider-wrap">
-                <input type="range" class="slider" id="highlights" min="-100" max="100" value="0" data-param="highlights" />
-                <span class="slider-val" id="highlights-val">0</span>
-              </div>
-            </div>
-            <div class="slider-row">
-              <label>Ombres</label>
-              <div class="slider-wrap">
-                <input type="range" class="slider" id="shadows" min="-100" max="100" value="0" data-param="shadows" />
-                <span class="slider-val" id="shadows-val">0</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel-section">
-          <h3 class="section-title">Couleur</h3>
-          <div class="sliders">
-            <div class="slider-row">
-              <label>Saturation</label>
-              <div class="slider-wrap">
-                <input type="range" class="slider" id="saturation" min="0" max="300" value="100" data-param="saturation" />
-                <span class="slider-val" id="saturation-val">100</span>
-              </div>
-            </div>
-            <div class="slider-row">
-              <label>Température</label>
-              <div class="slider-wrap">
-                <input type="range" class="slider" id="temperature" min="-100" max="100" value="0" data-param="temperature" />
-                <span class="slider-val" id="temperature-val">0</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel-section">
-          <h3 class="section-title">Netteté</h3>
-          <div class="sliders">
-            <div class="slider-row">
-              <label>Netteté</label>
-              <div class="slider-wrap">
-                <input type="range" class="slider" id="sharpness" min="0" max="300" value="100" data-param="sharpness" />
-                <span class="slider-val" id="sharpness-val">100</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel-section">
-          <button class="btn-reset" id="resetBtn">↺ Réinitialiser les réglages</button>
-        </div>
-      </div>
-
-      <!-- FILTERS TAB -->
-      <div class="tab-content" id="tab-filters">
-        <div class="panel-section">
-          <h3 class="section-title">Filtres créatifs</h3>
-          <div class="filter-grid">
-            <button class="filter-btn" data-filter="grayscale">
-              <div class="filter-preview grayscale-preview"></div>
-              <span>Noir & Blanc</span>
-            </button>
-            <button class="filter-btn" data-filter="sepia">
-              <div class="filter-preview sepia-preview"></div>
-              <span>Sépia</span>
-            </button>
-            <button class="filter-btn" data-filter="invert">
-              <div class="filter-preview invert-preview"></div>
-              <span>Inversé</span>
-            </button>
-            <button class="filter-btn" data-filter="auto_contrast">
-              <div class="filter-preview auto-preview"></div>
-              <span>Auto Contraste</span>
-            </button>
-            <button class="filter-btn" data-filter="equalize">
-              <div class="filter-preview equalize-preview"></div>
-              <span>Égaliser</span>
-            </button>
-            <button class="filter-btn" data-filter="vignette">
-              <div class="filter-preview vignette-preview"></div>
-              <span>Vignette</span>
-            </button>
-            <button class="filter-btn" data-filter="blur">
-              <div class="filter-preview blur-preview"></div>
-              <span>Flou doux</span>
-            </button>
-            <button class="filter-btn" data-filter="sharpen">
-              <div class="filter-preview sharpen-preview"></div>
-              <span>Accentuer</span>
-            </button>
-            <button class="filter-btn" data-filter="edge_enhance">
-              <div class="filter-preview edge-preview"></div>
-              <span>Contours</span>
-            </button>
-            <button class="filter-btn" data-filter="emboss">
-              <div class="filter-preview emboss-preview"></div>
-              <span>Embossage</span>
-            </button>
-          </div>
-          <div class="active-filters" id="activeFilters">
-            <span class="filters-label">Filtres actifs :</span>
-            <span class="no-filters">Aucun</span>
-          </div>
-          <button class="btn-reset" id="clearFiltersBtn">✕ Enlever les filtres</button>
-        </div>
-      </div>
-
-      <!-- TRANSFORM TAB -->
-      <div class="tab-content" id="tab-transform">
-        <div class="panel-section">
-          <h3 class="section-title">Rotation & Miroir</h3>
-          <div class="transform-btns">
-            <button class="btn-transform" id="rotateLeft">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.85"/></svg>
-              −90°
-            </button>
-            <button class="btn-transform" id="rotateRight">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.85"/></svg>
-              +90°
-            </button>
-            <button class="btn-transform" id="flipH">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="3" x2="12" y2="21"/><path d="M16 7l4 5-4 5"/><path d="M8 7l-4 5 4 5"/></svg>
-              Miroir H
-            </button>
-            <button class="btn-transform" id="flipV">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><path d="M7 8l5-4 5 4"/><path d="M7 16l5 4 5-4"/></svg>
-              Miroir V
-            </button>
-          </div>
-        </div>
-
-        <div class="panel-section">
-          <h3 class="section-title">Recadrage</h3>
-          <p class="section-hint">Dessinez une zone sur l'image pour recadrer</p>
-          <div class="crop-btns">
-            <button class="btn-transform active-tool" id="cropToggleBtn">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 2 6 18 22 18"/><polyline points="2 6 18 6 18 22"/></svg>
-              Activer le recadrage
-            </button>
-            <button class="btn-transform" id="applyCropBtn" style="display:none">
-              ✓ Appliquer
-            </button>
-            <button class="btn-transform" id="cancelCropBtn" style="display:none">
-              ✕ Annuler
-            </button>
-          </div>
-        </div>
-
-        <div class="panel-section">
-          <h3 class="section-title">État actuel</h3>
-          <div class="transform-state" id="transformState">
-            <div class="state-row"><span>Rotation</span><span id="state-rotation">0°</span></div>
-            <div class="state-row"><span>Miroir H</span><span id="state-flipH">Non</span></div>
-            <div class="state-row"><span>Miroir V</span><span id="state-flipV">Non</span></div>
-          </div>
-          <button class="btn-reset" id="resetTransformBtn">↺ Réinitialiser</button>
-        </div>
-      </div>
-    </aside>
-
-    <!-- CENTER: Canvas -->
-    <section class="canvas-area" id="canvasArea">
-      <!-- Empty State -->
-      <div class="empty-state" id="emptyState">
-        <div class="empty-icon">
-          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-        </div>
-        <h2>Ouvrez une image pour commencer</h2>
-        <p>Formats supportés : JPG, PNG, WebP, BMP, TIFF</p>
-        <label class="btn-primary" for="fileInput">
-          Choisir une image
-        </label>
-      </div>
-
-      <!-- Image Wrapper -->
-      <div class="image-wrapper" id="imageWrapper" style="display:none">
-        <div class="crop-overlay" id="cropOverlay" style="display:none">
-          <div class="crop-box" id="cropBox"></div>
-        </div>
-        <img class="main-image" id="mainImage" src="" alt="Editing" />
-      </div>
-
-      <!-- Processing Indicator -->
-      <div class="processing" id="processingIndicator" style="display:none">
-        <div class="spinner"></div>
-        <span>Traitement en cours…</span>
-      </div>
-
-      <!-- Bottom Info Bar -->
-      <div class="info-bar" id="infoBar" style="display:none">
-        <span id="imageDimensions">—</span>
-        <span class="info-sep">·</span>
-        <span id="imageMode">—</span>
-        <div class="zoom-controls">
-          <button id="zoomOut">−</button>
-          <span id="zoomLevel">100%</span>
-          <button id="zoomIn">+</button>
-          <button id="zoomFit">Fit</button>
-        </div>
-      </div>
-    </section>
-
-    <!-- RIGHT PANEL: Export -->
-    <aside class="panel panel-right" id="rightPanel">
-      <div class="panel-section">
-        <h3 class="section-title">Aperçu</h3>
-        <div class="mini-preview" id="miniPreview">
-          <div class="mini-placeholder">Pas d'image</div>
-        </div>
-        <div class="image-info" id="imageInfo" style="display:none">
-          <div class="info-row"><span>Largeur</span><span id="info-width">—</span></div>
-          <div class="info-row"><span>Hauteur</span><span id="info-height">—</span></div>
-          <div class="info-row"><span>Mode</span><span id="info-mode">—</span></div>
-        </div>
-      </div>
-
-      <div class="panel-section">
-        <h3 class="section-title">Exporter</h3>
-        <div class="export-options">
-          <div class="option-row">
-            <label>Format</label>
-            <select id="exportFormat" class="select">
-              <option value="jpeg">JPEG</option>
-              <option value="png">PNG</option>
-              <option value="webp">WebP</option>
-            </select>
-          </div>
-          <div class="option-row" id="qualityRow">
-            <label>Qualité</label>
-            <div class="slider-wrap">
-              <input type="range" class="slider" id="exportQuality" min="10" max="100" value="95" />
-              <span class="slider-val" id="quality-val">95</span>
-            </div>
-          </div>
-        </div>
-        <button class="btn-primary" id="downloadBtn" disabled>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Télécharger
+        <button class="btn-addlayer" id="addSolidBtn" title="Couleur unie">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+          Couleur
+        </button>
+        <button class="btn-addlayer" id="addGradientBtn" title="Dégradé">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><defs><linearGradient id="g1"><stop offset="0%" stop-color="#fff"/><stop offset="100%" stop-color="#000"/></linearGradient></defs><rect x="3" y="3" width="18" height="18" rx="2" fill="url(#g1)"/></svg>
+          Dégradé
+        </button>
+        <button class="btn-addlayer" id="addTextBtn" title="Texte">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+          Texte
         </button>
       </div>
+    </div>
 
-      <div class="panel-section">
-        <h3 class="section-title">Historique</h3>
-        <div class="history-list" id="historyList">
-          <p class="no-history">Aucune modification</p>
+    <!-- Layer-level adjustments (shown when a layer is selected) -->
+    <div id="layerAdjPanel" style="display:none">
+      <div class="tabs">
+        <button class="tab active" data-ltab="ladjust">Réglages</button>
+        <button class="tab" data-ltab="lfilters">Filtres</button>
+        <button class="tab" data-ltab="ltransform">Transformer</button>
+      </div>
+
+      <div class="ltab-content active" id="ltab-ladjust">
+        <div class="panel-section">
+          <h3 class="section-title">Calque sélectionné</h3>
+          <div class="sliders">
+            <div class="slider-row"><label>Luminosité</label><div class="slider-wrap"><input type="range" class="lslider" data-lparam="brightness" min="0" max="200" value="100"/><span class="slider-val lv_brightness">100</span></div></div>
+            <div class="slider-row"><label>Contraste</label><div class="slider-wrap"><input type="range" class="lslider" data-lparam="contrast" min="0" max="200" value="100"/><span class="slider-val lv_contrast">100</span></div></div>
+            <div class="slider-row"><label>Exposition</label><div class="slider-wrap"><input type="range" class="lslider" data-lparam="exposure" min="-100" max="100" value="0"/><span class="slider-val lv_exposure">0</span></div></div>
+            <div class="slider-row"><label>Saturation</label><div class="slider-wrap"><input type="range" class="lslider" data-lparam="saturation" min="0" max="300" value="100"/><span class="slider-val lv_saturation">100</span></div></div>
+            <div class="slider-row"><label>Température</label><div class="slider-wrap"><input type="range" class="lslider" data-lparam="temperature" min="-100" max="100" value="0"/><span class="slider-val lv_temperature">0</span></div></div>
+            <div class="slider-row"><label>Hautes lum.</label><div class="slider-wrap"><input type="range" class="lslider" data-lparam="highlights" min="-100" max="100" value="0"/><span class="slider-val lv_highlights">0</span></div></div>
+            <div class="slider-row"><label>Ombres</label><div class="slider-wrap"><input type="range" class="lslider" data-lparam="shadows" min="-100" max="100" value="0"/><span class="slider-val lv_shadows">0</span></div></div>
+            <div class="slider-row"><label>Netteté</label><div class="slider-wrap"><input type="range" class="lslider" data-lparam="sharpness" min="0" max="300" value="100"/><span class="slider-val lv_sharpness">100</span></div></div>
+          </div>
+          <button class="btn-reset" id="resetLayerAdjBtn" style="margin-top:10px">↺ Réinitialiser</button>
         </div>
-        <button class="btn-reset" id="undoBtn" disabled>↩ Annuler la dernière</button>
       </div>
 
-      <div class="panel-section panel-about">
-        <h3 class="section-title">À propos</h3>
-        <p class="about-text">
-          <strong>Open Photo Editor</strong> est un éditeur photo open source.<br/>
-          Tous les calculs sont effectués <em>en local</em> sur votre serveur.
-          Aucune image n'est envoyée vers des services tiers.
-        </p>
-        <a href="https://github.com" target="_blank" class="about-link">★ GitHub</a>
+      <div class="ltab-content" id="ltab-lfilters">
+        <div class="panel-section">
+          <div class="filter-grid">
+            <button class="filter-btn lfilter-btn" data-filter="grayscale"><div class="fp grayscale-p"></div><span>N&amp;B</span></button>
+            <button class="filter-btn lfilter-btn" data-filter="sepia"><div class="fp sepia-p"></div><span>Sépia</span></button>
+            <button class="filter-btn lfilter-btn" data-filter="invert"><div class="fp invert-p"></div><span>Inversé</span></button>
+            <button class="filter-btn lfilter-btn" data-filter="auto_contrast"><div class="fp auto-p"></div><span>Auto C.</span></button>
+            <button class="filter-btn lfilter-btn" data-filter="vignette"><div class="fp vignette-p"></div><span>Vignette</span></button>
+            <button class="filter-btn lfilter-btn" data-filter="blur"><div class="fp blur-p"></div><span>Flou</span></button>
+            <button class="filter-btn lfilter-btn" data-filter="sharpen"><div class="fp sharpen-p"></div><span>Netteté</span></button>
+            <button class="filter-btn lfilter-btn" data-filter="noise"><div class="fp noise-p"></div><span>Grain</span></button>
+            <button class="filter-btn lfilter-btn" data-filter="equalize"><div class="fp equalize-p"></div><span>Égaliser</span></button>
+            <button class="filter-btn lfilter-btn" data-filter="emboss"><div class="fp emboss-p"></div><span>Embossage</span></button>
+          </div>
+          <button class="btn-reset" id="clearLayerFiltersBtn" style="margin-top:8px">✕ Effacer filtres</button>
+        </div>
       </div>
-    </aside>
 
-  </main>
+      <div class="ltab-content" id="ltab-ltransform">
+        <div class="panel-section">
+          <h3 class="section-title">Transformer le calque</h3>
+          <div class="transform-btns">
+            <button class="btn-transform" id="lRotL">↺ −90°</button>
+            <button class="btn-transform" id="lRotR">↻ +90°</button>
+            <button class="btn-transform" id="lFlipH">↔ Miroir H</button>
+            <button class="btn-transform" id="lFlipV">↕ Miroir V</button>
+          </div>
+        </div>
+        <div class="panel-section">
+          <h3 class="section-title">Position</h3>
+          <div class="pos-fields">
+            <div class="pos-row">
+              <label>X</label>
+              <input type="number" class="pos-input" id="layerX" value="0"/>
+            </div>
+            <div class="pos-row">
+              <label>Y</label>
+              <input type="number" class="pos-input" id="layerY" value="0"/>
+            </div>
+          </div>
+          <button class="btn-transform" id="applyPosBtn" style="width:100%;margin-top:8px">Appliquer position</button>
+        </div>
+      </div>
+    </div>
 
-  <!-- Toast Notification -->
-  <div class="toast" id="toast"></div>
+    <!-- Canvas settings -->
+    <div class="panel-section" id="canvasSettingsPanel">
+      <h3 class="section-title">Canevas</h3>
+      <div class="pos-fields">
+        <div class="pos-row"><label>L</label><input type="number" class="pos-input" id="canvasW" value="1920" min="1" max="8000"/></div>
+        <div class="pos-row"><label>H</label><input type="number" class="pos-input" id="canvasH" value="1080" min="1" max="8000"/></div>
+      </div>
+      <button class="btn-transform" id="newProjectBtn" style="width:100%;margin-top:8px">
+        + Nouveau projet
+      </button>
+    </div>
+  </aside>
 
-  <script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+  <!-- CENTER: Compose canvas -->
+  <section class="canvas-area" id="composeCanvas">
+    <div class="empty-state" id="composeEmptyState">
+      <div class="empty-icon">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+      </div>
+      <h2>Créez un projet ou ajoutez des calques</h2>
+      <p>Montage multi-calques avec modes de fusion, opacité, filtres par calque</p>
+      <button class="btn-primary" id="startProjectBtn">Nouveau projet</button>
+    </div>
+    <div class="compose-wrapper" id="composeWrapper" style="display:none">
+      <img class="main-image" id="composeImage" src="" alt=""/>
+    </div>
+    <div class="processing" id="composeProcessing" style="display:none">
+      <div class="spinner"></div><span>Composition…</span>
+    </div>
+    <div class="info-bar" id="composeInfoBar" style="display:none">
+      <span id="compImgDim">—</span>
+      <span class="info-sep">·</span>
+      <span id="compLayerCount">0 calque(s)</span>
+      <div class="zoom-controls">
+        <button id="czoomOut">−</button>
+        <span id="czoomLevel">100%</span>
+        <button id="czoomIn">+</button>
+        <button id="czoomFit">Fit</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT: Layers panel -->
+  <aside class="panel panel-right" id="layersPanel">
+    <div class="panel-section">
+      <h3 class="section-title">Calques
+        <span class="layer-count-badge" id="layerCountBadge">0</span>
+      </h3>
+      <div class="layers-list" id="layersList">
+        <p class="no-history">Aucun calque</p>
+      </div>
+      <div class="layers-actions">
+        <button class="btn-reset" id="mergeSelectedBtn" disabled title="Fusionner les calques sélectionnés">⊕ Fusionner</button>
+        <button class="btn-reset" id="flattenAllBtn" disabled title="Aplatir tout en un calque">⇩ Aplatir tout</button>
+      </div>
+    </div>
+
+    <div class="panel-section" id="layerPropsPanel" style="display:none">
+      <h3 class="section-title">Propriétés</h3>
+      <div class="option-row">
+        <label>Opacité</label>
+        <div class="slider-wrap">
+          <input type="range" class="slider" id="layerOpacity" min="0" max="100" value="100"/>
+          <span class="slider-val" id="layerOpacityVal">100</span>
+        </div>
+      </div>
+      <div class="option-row">
+        <label>Mode de fusion</label>
+        <select id="layerBlendMode" class="select">
+          <option value="normal">Normal</option>
+          <option value="multiply">Multiplier</option>
+          <option value="screen">Écran</option>
+          <option value="overlay">Superposition</option>
+          <option value="soft_light">Lumière douce</option>
+          <option value="hard_light">Lumière dure</option>
+          <option value="difference">Différence</option>
+          <option value="exclusion">Exclusion</option>
+          <option value="darken">Assombrir</option>
+          <option value="lighten">Éclaircir</option>
+          <option value="color_dodge">Esquiver couleur</option>
+          <option value="color_burn">Densité couleur</option>
+          <option value="luminosity">Luminosité</option>
+        </select>
+      </div>
+      <div class="option-row" id="solidColorRow" style="display:none">
+        <label>Couleur</label>
+        <input type="color" id="solidColorPicker" class="color-input" value="#3a3a5c"/>
+      </div>
+      <div class="option-row" id="gradientRow" style="display:none">
+        <label>Couleur 1</label>
+        <input type="color" id="grad1Picker" class="color-input" value="#1a1a2e"/>
+        <label style="margin-top:6px">Couleur 2</label>
+        <input type="color" id="grad2Picker" class="color-input" value="#e8c547"/>
+        <label style="margin-top:6px">Angle</label>
+        <div class="slider-wrap">
+          <input type="range" id="gradAngle" class="slider" min="0" max="360" value="135"/>
+          <span class="slider-val" id="gradAngleVal">135°</span>
+        </div>
+      </div>
+      <div class="option-row" id="textPropsRow" style="display:none">
+        <label>Texte</label>
+        <input type="text" id="textContent" class="text-input" value="Votre texte" placeholder="Texte…"/>
+        <label style="margin-top:6px">Taille</label>
+        <div class="slider-wrap">
+          <input type="range" id="textSize" class="slider" min="8" max="300" value="72"/>
+          <span class="slider-val" id="textSizeVal">72</span>
+        </div>
+        <label style="margin-top:6px">Couleur</label>
+        <input type="color" id="textColorPicker" class="color-input" value="#ffffff"/>
+      </div>
+      <button class="btn-reset" id="applyLayerPropsBtn" style="margin-top:4px">
+        ✓ Appliquer
+      </button>
+    </div>
+
+    <div class="panel-section">
+      <h3 class="section-title">Exporter la composition</h3>
+      <div class="option-row">
+        <label>Format</label>
+        <select id="compExportFmt" class="select">
+          <option value="jpeg">JPEG</option>
+          <option value="png">PNG (avec transparence)</option>
+          <option value="webp">WebP</option>
+        </select>
+      </div>
+      <div class="option-row">
+        <label>Qualité</label>
+        <div class="slider-wrap">
+          <input type="range" class="slider" id="compQuality" min="10" max="100" value="95"/>
+          <span class="slider-val" id="compQualVal">95</span>
+        </div>
+      </div>
+      <button class="btn-primary" id="exportCompBtn" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Exporter
+      </button>
+    </div>
+  </aside>
+</main>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Modals -->
+<div class="modal-overlay" id="modalOverlay" style="display:none">
+  <div class="modal" id="modalBox">
+    <div class="modal-title" id="modalTitle">Nouveau calque</div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer">
+      <button class="btn-reset" id="modalCancel">Annuler</button>
+      <button class="btn-primary" id="modalConfirm" style="width:auto;padding:9px 20px">OK</button>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/editor.js') }}"></script>
 </body>
 </html>
