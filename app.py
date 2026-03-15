@@ -263,6 +263,17 @@ def composite_layers(project, scale=1.0):
         elif ltype == 'text':     limg = render_layer_text(layer, pw, ph)
         else: continue
 
+        # Display size override (from mouse resize)
+        display_w = layer.get('display_w')
+        display_h = layer.get('display_h')
+        if display_w and display_h and (display_w != limg.width or display_h != limg.height):
+            limg = limg.resize((max(1, int(display_w)), max(1, int(display_h))), Image.LANCZOS)
+
+        # Display rotation override (from mouse rotate)
+        display_rotation = layer.get('display_rotation', 0)
+        if display_rotation:
+            limg = limg.rotate(-display_rotation, expand=True, resample=Image.BICUBIC)
+
         # Position & scale
         lx = int(layer.get('x', 0) * scale)
         ly = int(layer.get('y', 0) * scale)
@@ -428,6 +439,7 @@ def update_layer(pid, lid):
 
     data = request.get_json() or {}
     for field in ['visible','opacity','blend_mode','name','x','y',
+                  'display_w','display_h','display_rotation',
                   'adjustments','filters','transforms','crop',
                   'color','color1','color2','angle','text','font_size']:
         if field in data:
