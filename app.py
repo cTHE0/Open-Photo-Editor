@@ -15,7 +15,7 @@ import base64
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024  # 64MB max
-app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff', 'gif'}
 
@@ -552,33 +552,45 @@ def index():
 # ── Upload ────────────────────────────────────────────────────
 @app.route('/api/upload', methods=['POST'])
 def upload_image():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file'}), 400
-    file = request.files['file']
-    if not file.filename or not allowed_file(file.filename):
-        return jsonify({'error': 'Invalid file'}), 400
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file in request'}), 400
+        file = request.files['file']
+        if not file.filename:
+            return jsonify({'error': 'No filename'}), 400
+        
+        filename = file.filename.lower()
+        ext = filename.rsplit('.', 1)[1] if '.' in filename else ''
+        if ext not in ALLOWED_EXTENSIONS:
+            return jsonify({'error': f'Extension {ext} non supportée'}), 400
 
-    file_id = str(uuid.uuid4())
-    img = Image.open(file.stream).convert('RGBA')
-    w, h = img.size
-    
-    # Reset stream position for saving
-    file.stream.seek(0)
-    
-    path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}.png")
-    img.save(path, 'PNG')
+        file_id = str(uuid.uuid4())
+        img = Image.open(file.stream).convert('RGBA')
+        w, h = img.size
 
-    preview = img.copy()
-    if max(preview.size) > 2048:
-        preview.thumbnail((2048, 2048), Image.LANCZOS)
+        # Reset stream position for saving
+        file.stream.seek(0)
 
-    return jsonify({
-        'success': True,
-        'file_id': file_id,
-        'width': w,
-        'height': h,
-        'preview': f"data:image/png;base64,{image_to_base64(preview,'PNG')}"
-    })
+        # Ensure upload folder exists
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+        
+        path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}.png")
+        img.save(path, 'PNG')
+
+        preview = img.copy()
+        if max(preview.size) > 2048:
+            preview.thumbnail((2048, 2048), Image.LANCZOS)
+
+        return jsonify({
+            'success': True,
+            'file_id': file_id,
+            'width': w,
+            'height': h,
+            'preview': f"data:image/png;base64,{image_to_base64(preview,'PNG')}"
+        })
+    except Exception as e:
+        print(f"Upload error: {str(e)}")
+        return jsonify({'error': f'Erreur: {str(e)}'}), 500
 
 # ── Create project ────────────────────────────────────────────
 @app.route('/api/project/new', methods=['POST'])
@@ -923,5 +935,6 @@ def download_image():
                      download_name=f'edited.{fmt.lower()}')
 
 if __name__ == '__main__':
-    os.makedirs('uploads', exist_ok=True)
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    print(f"Upload folder: {app.config['UPLOAD_FOLDER']}")
     app.run(debug=True, host='0.0.0.0', port=5000)
