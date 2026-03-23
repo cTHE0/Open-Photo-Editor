@@ -75,9 +75,15 @@ def apply_adjustments(img, adj):
         arr = np.array(rgb, np.float32)
         lum = 0.299*arr[:,:,0] + 0.587*arr[:,:,1] + 0.114*arr[:,:,2]
         if hl != 0:
-            arr += hl * (lum/255.0)**2 * np.ones_like(arr)
+            hl_factor = hl * (lum/255.0)**2
+            arr[:,:,0] += hl_factor
+            arr[:,:,1] += hl_factor
+            arr[:,:,2] += hl_factor
         if sh != 0:
-            arr += sh * (1-lum/255.0)**2 * np.ones_like(arr)
+            sh_factor = sh * (1-lum/255.0)**2
+            arr[:,:,0] += sh_factor
+            arr[:,:,1] += sh_factor
+            arr[:,:,2] += sh_factor
         rgb = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
 
     temp = adj.get('temperature', 0)
