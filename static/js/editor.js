@@ -190,6 +190,17 @@ function updateUndoButton() {
 // CANVAS RENDERING (Client-Side)
 // ══════════════════════════════════════════════════════════════
 
+let _renderCanvas = null;
+let _renderCtx = null;
+
+function getRenderCanvas() {
+  if (!_renderCanvas) {
+    _renderCanvas = document.createElement('canvas');
+    _renderCtx = _renderCanvas.getContext('2d');
+  }
+  return _renderCanvas;
+}
+
 function createLayerCanvas(width, height) {
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -253,10 +264,10 @@ function renderLayerToCanvas(layer) {
 }
 
 function renderAllLayers() {
-  const compositeCanvas = $('compositeImg');
-  const ctx = compositeCanvas.getContext('2d');
-  compositeCanvas.width = S.canvasW;
-  compositeCanvas.height = S.canvasH;
+  const renderCanvas = getRenderCanvas();
+  renderCanvas.width = S.canvasW;
+  renderCanvas.height = S.canvasH;
+  const ctx = _renderCtx;
   
   ctx.clearRect(0, 0, S.canvasW, S.canvasH);
   
@@ -266,6 +277,10 @@ function renderAllLayers() {
     ctx.globalAlpha = 1;
     ctx.drawImage(layerCanvas, 0, 0);
   }
+  
+  // Update composite image
+  const compositeImg = $('compositeImg');
+  compositeImg.src = renderCanvas.toDataURL('image/png');
   
   S.layerImages = {};
   S.layers.forEach(l => {
@@ -1416,8 +1431,9 @@ $('canvasScene').addEventListener('click', async e => {
   const pt = s2c(e.clientX, e.clientY);
   if (pt.x < 0 || pt.x >= S.canvasW || pt.y < 0 || pt.y >= S.canvasH) return;
   
-  const canvas = $('compositeImg');
-  const ctx = canvas.getContext('2d');
+  // Use render canvas for color picking
+  const renderCanvas = getRenderCanvas();
+  const ctx = renderCanvas.getContext('2d');
   const imageData = ctx.getImageData(Math.floor(pt.x), Math.floor(pt.y), 1, 1).data;
   const hex = '#' + [imageData[0], imageData[1], imageData[2]].map(x => x.toString(16).padStart(2, '0')).join('');
   
