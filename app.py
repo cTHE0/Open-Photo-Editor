@@ -181,9 +181,11 @@ def blend_mode(base, over, mode):
     if mode == 'darken':     return np.minimum(b, a)
     if mode == 'lighten':    return np.maximum(b, a)
     if mode == 'color_dodge':
-        return np.clip(b/np.where(a>=1, 1e-6, 1-a), 0, 1)
+        result = np.clip(b / np.clip(a, 1e-6, 1), 0, 1)
+        return np.where(a >= 1, 1, result)
     if mode == 'color_burn':
-        return np.clip(1-(1-b)/np.where(a<=0, 1e-6, a), 0, 1)
+        result = np.clip(1 - (1 - b) / np.clip(a, 1e-6, 1), 0, 1)
+        return np.where(a <= 0, 0, result)
     if mode == 'luminosity':
         lum_b = (0.299*b[:,:,0]+0.587*b[:,:,1]+0.114*b[:,:,2])[:,:,np.newaxis]
         lum_a = (0.299*a[:,:,0]+0.587*a[:,:,1]+0.114*a[:,:,2])[:,:,np.newaxis]
