@@ -408,7 +408,16 @@ def add_layer(pid):
                 if not project['layers']:
                     project['canvas_width']  = img.width
                     project['canvas_height'] = img.height
-        layer.setdefault('image_data', data.get('image_data', ''))
+        elif not layer.get('image_data'):
+            layer['image_data'] = data.get('image_data', '')
+            # If image_data provided directly, extract dimensions from it
+            if layer['image_data']:
+                try:
+                    img = base64_to_image(layer['image_data'])
+                    layer['orig_width'] = img.width
+                    layer['orig_height'] = img.height
+                except Exception:
+                    pass
 
     elif ltype == 'solid':
         layer['color'] = data.get('color', '#3a3a5c')
