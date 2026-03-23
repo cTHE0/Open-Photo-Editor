@@ -46,6 +46,15 @@
   </div>
 
   <div class="header-right">
+    <button class="btn-export" id="saveProjectBtn" disabled title="Sauvegarder le projet (Ctrl+P)">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 13v4H3v-4"/><polyline points="6 8 10 13 14 8"/><line x1="10" y1="2" x2="10" y2="13"/></svg>
+      Sauvegarder
+    </button>
+    <label class="btn-export" style="cursor:pointer;margin-right:8px" title="Charger un projet">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 14v3h14v-3"/><polyline points="6 8 10 3 14 8"/><line x1="10" y1="3" x2="10" y2="14"/></svg>
+      Ouvrir projet
+      <input type="file" id="loadProjectInput" accept=".json" hidden/>
+    </label>
     <button class="btn-export" id="exportBtn" disabled>
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 13v4H3v-4"/><polyline points="6 8 10 13 14 8"/><line x1="10" y1="2" x2="10" y2="13"/></svg>
       Exporter

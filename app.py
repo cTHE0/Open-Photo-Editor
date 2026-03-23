@@ -594,6 +594,57 @@ def export_project(pid):
     return send_file(buf, mimetype=mime, as_attachment=True,
                      download_name=f'composition.{fmt.lower()}')
 
+# ── Save project (JSON with all layers) ───────────────────────
+@app.route('/api/project/<pid>/save', methods=['POST'])
+def save_project(pid):
+    if pid not in PROJECTS: return jsonify({'error': 'Not found'}), 404
+    project = PROJECTS[pid]
+    
+    # Create serializable project data
+    project_data = {
+        'version': '1.0',
+        'canvas_width': project['canvas_width'],
+        'canvas_height': project['canvas_height'],
+        'layers': []
+    }
+    
+    for layer in project.get('layers', []):
+        layer_data = {k: v for k, v in layer.items() if k != 'image_data'}
+        layer_data['has_image'] = bool(layer.get('image_data'))
+        # Include image data for complete project save
+        if layer.get('image_data'):
+            layer_data['image_data'] = layer['image_data']
+        project_data['layers'].append(layer_data)
+    
+    return jsonify({
+        'success': True,
+        'project': project_data,
+        'filename': f'project_{pid}.json'
+    })
+
+# ── Load project (JSON) ───────────────────────────────────────
+@app.route('/api/project/load', methods=['POST'])
+def load_project():
+    data = request.get_json()
+    if not data or 'project' not in data:
+        return jsonify({'error': 'No project data'}), 400
+    
+    proj = data['project']
+    project_id = str(uuid.uuid4())
+    
+    PROJECTS[project_id] = {
+        'canvas_width': proj.get('canvas_width', 1920),
+        'canvas_height': proj.get('canvas_height', 1080),
+        'layers': proj.get('layers', [])
+    }
+    
+    return jsonify({
+        'success': True,
+        'project_id': project_id,
+        'canvas_width': PROJECTS[project_id]['canvas_width'],
+        'canvas_height': PROJECTS[project_id]['canvas_height']
+    })
+
 # ── Single image quick process (simple mode) ──────────────────
 @app.route('/api/process', methods=['POST'])
 def process_image():

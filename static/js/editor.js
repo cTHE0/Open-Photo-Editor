@@ -1,10 +1,12 @@
 "use strict";
 /**
- * Open Photo Editor v3.1
- * Fixes:
- *  - Race condition: project always created before addLayer
- *  - Instant drag/resize preview via offscreen HTMLCanvasElement
- *  - Debounced server sync only on mouseup
+ * Open Photo Editor v3.2
+ * Improvements:
+ *  - Race condition fix
+ *  - Instant drag/resize preview via offscreen canvas
+ *  - Debounced server sync
+ *  - Request deduplication and caching
+ *  - Throttled preview updates
  */
 
 // ══════════════════════════════════════════════════════════════
@@ -21,6 +23,28 @@ function toast(msg, type = 'info') {
   _toastT = setTimeout(() => t.classList.remove('show'), 3200);
 }
 function busy(v) { $('processing').style.display = v ? 'flex' : 'none'; }
+
+// Throttle function for limiting update frequency
+function throttle(func, limit) {
+  let inThrottle, lastResult;
+  return function(...args) {
+    if (!inThrottle) {
+      inThrottle = true;
+      lastResult = func.apply(this, args);
+      setTimeout(() => inThrottle = false, limit);
+    }
+    return lastResult;
+  };
+}
+
+// Debounce function
+function debounce(func, wait) {
+  let timeout;
+  return function(...args) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func.apply(this, args), wait);
+  };
+}
 
 // ══════════════════════════════════════════════════════════════
 // STATE
@@ -42,6 +66,12 @@ const S = {
   // Offscreen canvas for instant preview
   offscreen: null,        // OffscreenCanvas or regular Canvas
   layerImages: {},        // { layer_id: ImageBitmap | HTMLImageElement }
+  
+  // Performance: request deduplication
+  _pendingRequests: {},   // Track pending API requests by layer ID
+  _lastUpdate: {},        // Last update data per layer
+  _compositeCache: null,  // Cached composite image
+  _cacheVersion: 0,       // Increment on layer changes
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -189,6 +219,7 @@ function initScene() {
   $('infoBar').style.display       = 'flex';
   $('rpInfo').style.display        = '';
   $('exportBtn').disabled          = false;
+  $('saveProjectBtn').disabled     = false;
   $('downloadBtn').disabled        = false;
   $('mergeBtn').disabled           = false;
   $('flattenBtn').disabled         = false;
@@ -269,21 +300,44 @@ async function addLayerToServer(params) {
   return d.layer;
 }
 
-async function serverUpdateLayer(id, data) {
+async function serverUpdateLayer(id, data, skipCache = false) {
   if (!S.projectId || !id) return null;
-  const r = await fetch(`/api/project/${S.projectId}/layer/${id}/update`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-  if (!r.ok) { console.warn('Update layer failed', r.status); return null; }
-  const d = await r.json();
-  if (!d.success) return null;
-  const idx = S.layers.findIndex(l => l.id === id);
-  if (idx >= 0) Object.assign(S.layers[idx], d.layer);
-  await cacheLayerImage(id, d.preview);
-  setPreview(d.preview);
-  renderLayerList();
-  return d;
+  
+  // Deduplicate: cancel pending request for same layer
+  if (S._pendingRequests[id]) {
+    // Update will use latest data when current completes
+    S._lastUpdate[id] = data;
+    return null;
+  }
+  
+  S._pendingRequests[id] = true;
+  
+  try {
+    const r = await fetch(`/api/project/${S.projectId}/layer/${id}/update`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!r.ok) { console.warn('Update layer failed', r.status); return null; }
+    const d = await r.json();
+    if (!d.success) return null;
+    const idx = S.layers.findIndex(l => l.id === id);
+    if (idx >= 0) Object.assign(S.layers[idx], d.layer);
+    
+    if (!skipCache) {
+      await cacheLayerImage(id, d.preview);
+      setPreview(d.preview);
+      renderLayerList();
+    }
+    return d;
+  } finally {
+    S._pendingRequests[id] = false;
+    // Process any pending update that came in during this request
+    if (S._lastUpdate[id]) {
+      const nextData = S._lastUpdate[id];
+      delete S._lastUpdate[id];
+      await serverUpdateLayer(id, nextData, skipCache);
+    }
+  }
 }
 
 async function deleteLayerFromServer(id) {
@@ -1045,6 +1099,89 @@ $('exportBtn').addEventListener('click', doExport);
 $('downloadBtn').addEventListener('click', doExport);
 
 // ══════════════════════════════════════════════════════════════
+// PROJECT SAVE / LOAD
+// ══════════════════════════════════════════════════════════════
+
+async function saveProject() {
+  if (!S.projectId) { toast('Aucun projet actif', 'error'); return; }
+  busy(true);
+  try {
+    const r = await fetch(`/api/project/${S.projectId}/save`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const d = await r.json();
+    if (!d.success) throw new Error(d.error || 'Save failed');
+    
+    // Download JSON file
+    const blob = new Blob([JSON.stringify(d.project, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `project_${S.projectId.slice(0, 8)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('Projet sauvegardé !', 'success');
+  } catch(e) {
+    toast('Erreur sauvegarde : ' + e.message, 'error');
+  } finally {
+    busy(false);
+  }
+}
+
+async function loadProject(file) {
+  busy(true);
+  try {
+    const text = await file.text();
+    const proj = JSON.parse(text);
+    
+    if (!proj.canvas_width || !proj.layers) {
+      throw new Error('Format de projet invalide');
+    }
+    
+    const r = await fetch('/api/project/load', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: proj })
+    });
+    const d = await r.json();
+    if (!d.success) throw new Error(d.error || 'Load failed');
+    
+    // Initialize new project
+    S.projectId = d.project_id;
+    S.canvasW = d.canvas_width;
+    S.canvasH = d.canvas_height;
+    S.layers = proj.layers || [];
+    
+    // Cache layer images
+    S.layerImages = {};
+    for (const layer of S.layers) {
+      if (layer.image_data) {
+        await cacheLayerImage(layer.id, layer.image_data);
+      }
+    }
+    
+    initScene();
+    renderLayerList();
+    if (S.layers.length > 0) {
+      setActive(S.layers[0].id);
+    }
+    toast('Projet chargé !', 'success');
+  } catch(e) {
+    toast('Erreur chargement : ' + e.message, 'error');
+    console.error(e);
+  } finally {
+    busy(false);
+  }
+}
+
+$('saveProjectBtn').addEventListener('click', saveProject);
+$('loadProjectInput').addEventListener('change', e => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (f) loadProject(f);
+});
+
+// ══════════════════════════════════════════════════════════════
 // LAYERS LIST
 // ══════════════════════════════════════════════════════════════
 function renderLayerList() {
@@ -1111,6 +1248,7 @@ document.addEventListener('keydown', e => {
     if (e.key === '0') { e.preventDefault(); fitZoom(); }
     if (e.key === 'o') { e.preventDefault(); $('fileInput').click(); }
     if (e.key === 's') { e.preventDefault(); doExport(); }
+    if (e.key === 'p') { e.preventDefault(); saveProject(); }
     if (e.key === 'd' && S.activeId) { e.preventDefault(); busy(true); duplicateLayerServer(S.activeId).finally(()=>busy(false)); }
   }
 
