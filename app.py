@@ -442,6 +442,28 @@ def render_layer_text(layer, canvas_w, canvas_h):
     img = apply_layer_styles(img, layer.get('styles', {}))
     return img
 
+def render_layer_shape(layer, canvas_w, canvas_h):
+    """Render shape layer (rectangle, ellipse)."""
+    img = Image.new('RGBA', (canvas_w, canvas_h), (0,0,0,0))
+    draw = ImageDraw.Draw(img)
+    
+    shape_type = layer.get('shape', 'rectangle')
+    color = layer.get('color', '#3a3a5c')
+    x = layer.get('x', 50)
+    y = layer.get('y', 50)
+    w = layer.get('width', 200)
+    h = layer.get('height', 150)
+    
+    r,g,b = int(color[1:3],16),int(color[3:5],16),int(color[5:7],16)
+    
+    if shape_type == 'rectangle':
+        draw.rounded_rectangle([x, y, x+w, y+h], radius=10, fill=(r,g,b,255))
+    elif shape_type == 'ellipse':
+        draw.ellipse([x, y, x+w, y+h], fill=(r,g,b,255))
+    
+    img = apply_layer_styles(img, layer.get('styles', {}))
+    return img
+
 # ── Compositing engine ────────────────────────────────────────
 
 def composite_layers(project, scale=1.0):
@@ -464,6 +486,7 @@ def composite_layers(project, scale=1.0):
         elif ltype == 'solid':    limg = render_layer_solid(layer, pw, ph)
         elif ltype == 'gradient': limg = render_layer_gradient(layer, pw, ph)
         elif ltype == 'text':     limg = render_layer_text(layer, pw, ph)
+        elif ltype == 'shape':    limg = render_layer_shape(layer, pw, ph)
         else: continue
 
         # Display size override (from mouse resize)
@@ -635,6 +658,14 @@ def add_layer(pid):
         layer['x']         = data.get('x', 80)
         layer['y']         = data.get('y', 80)
 
+    elif ltype == 'shape':
+        layer['shape']  = data.get('shape', 'rectangle')
+        layer['color']  = data.get('color', '#3a3a5c')
+        layer['x']      = data.get('x', 50)
+        layer['y']      = data.get('y', 50)
+        layer['width']  = data.get('width', 200)
+        layer['height'] = data.get('height', 150)
+
     project['layers'].append(layer)
 
     comp = composite_layers(project, get_scale(project))
@@ -658,7 +689,8 @@ def update_layer(pid, lid):
     for field in ['visible','opacity','blend_mode','name','x','y',
                   'display_w','display_h','display_rotation',
                   'adjustments','filters','transforms','crop','styles',
-                  'color','color1','color2','angle','text','font_size']:
+                  'color','color1','color2','angle','text','font_size',
+                  'shape','width','height']:
         if field in data:
             layer[field] = data[field]
 

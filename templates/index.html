@@ -200,6 +200,14 @@
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="16" y2="6"/><line x1="10" y1="6" x2="10" y2="17"/></svg>
           Texte
         </button>
+        <button class="lp-btn add-layer-btn" id="addRectBtn">
+          <svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" rx="1" fill="currentColor" opacity=".6"/></svg>
+          Rectangle
+        </button>
+        <button class="lp-btn add-layer-btn" id="addEllipseBtn">
+          <svg viewBox="0 0 20 20"><ellipse cx="10" cy="10" rx="7" ry="7" fill="currentColor" opacity=".6"/></svg>
+          Ellipse
+        </button>
       </div>
     </div>
 
@@ -269,6 +277,13 @@
           <div class="field-row">
             <label class="field-label">Couleur</label>
             <input type="color" id="textColor" class="color-pick" value="#ffffff"/>
+          </div>
+        </div>
+
+        <div id="shapeProps" style="display:none" class="type-props">
+          <div class="field-row">
+            <label class="field-label">Couleur</label>
+            <input type="color" id="shapeColor" class="color-pick" value="#3a3a5c"/>
           </div>
         </div>
 

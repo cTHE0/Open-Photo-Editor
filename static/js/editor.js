@@ -286,6 +286,20 @@ $('addTextBtn').addEventListener('click', async () => {
   finally { busy(false); }
 });
 
+$('addRectBtn').addEventListener('click', async () => {
+  busy(true);
+  try { await ensureProject(); await addLayerToServer({ type: 'shape', shape: 'rectangle', color: '#3a3a5c', x: 50, y: 50, width: 200, height: 150, name: 'Rectangle' }); }
+  catch (e) { toast('Erreur : ' + e.message, 'error'); }
+  finally { busy(false); }
+});
+
+$('addEllipseBtn').addEventListener('click', async () => {
+  busy(true);
+  try { await ensureProject(); await addLayerToServer({ type: 'shape', shape: 'ellipse', color: '#3a3a5c', x: 50, y: 50, width: 200, height: 150, name: 'Ellipse' }); }
+  catch (e) { toast('Erreur : ' + e.message, 'error'); }
+  finally { busy(false); }
+});
+
 $('newProjectBtn').addEventListener('click', async () => {
   S.projectId = null;
   busy(true);
@@ -862,6 +876,7 @@ function showSelectedLayerPanel(layer) {
   $('solidProps').style.display = layer.type === 'solid' ? '' : 'none';
   $('gradientProps').style.display = layer.type === 'gradient' ? '' : 'none';
   $('textProps').style.display = layer.type === 'text' ? '' : 'none';
+  $('shapeProps').style.display = layer.type === 'shape' ? '' : 'none';
   if (layer.type === 'solid') $('solidColor').value = layer.color || '#3a3a5c';
   if (layer.type === 'gradient') {
     $('grad1').value = layer.color1 || '#1a1a2e';
@@ -874,6 +889,9 @@ function showSelectedLayerPanel(layer) {
     $('textSize').value = layer.font_size || 72;
     $('sv-textSize').textContent = layer.font_size || 72;
     $('textColor').value = layer.color || '#ffffff';
+  }
+  if (layer.type === 'shape') {
+    $('shapeColor').value = layer.color || '#3a3a5c';
   }
   const adj = layer.adjustments || {};
   $$('.lslider').forEach(sl => {
@@ -1127,6 +1145,18 @@ $('gradAngle').addEventListener('input', e => {
 
 // Text size live
 $('textSize').addEventListener('input', e => { $('sv-textSize').textContent = e.target.value; });
+
+// Shape color live
+$('shapeColor').addEventListener('input', e => {
+  if (!S.activeId) return;
+  const layer = S.layers.find(l => l.id === S.activeId);
+  if (layer && layer.type === 'shape') {
+    layer.color = e.target.value;
+    drawLocalPreview(layer);
+  }
+  clearTimeout(S._shapeTimer);
+  S._shapeTimer = setTimeout(() => serverUpdateLayer(S.activeId, { color: e.target.value }), 200);
+});
 
 // Apply layer props - REMOVED - changes are now instant
 $('applyLayerPropsBtn').style.display = 'none';
