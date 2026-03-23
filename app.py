@@ -31,8 +31,16 @@ def allowed_file(filename):
 
 def image_to_base64(img, fmt='PNG', quality=90):
     buf = io.BytesIO()
-    if fmt == 'JPEG' and img.mode in ('RGBA', 'LA', 'P'):
-        img = img.convert('RGB')
+    # Convert incompatible modes for JPEG
+    if fmt == 'JPEG':
+        if img.mode in ('RGBA', 'LA', 'P', 'PA'):
+            img = img.convert('RGB')
+        elif img.mode in ('1', 'F', 'I'):
+            img = img.convert('L').convert('RGB')
+        elif img.mode == 'L':
+            img = img.convert('RGB')
+    elif fmt == 'WEBP' and img.mode == 'P':
+        img = img.convert('RGBA')
     kw = {'format': fmt}
     if fmt in ('JPEG', 'WEBP'):
         kw['quality'] = quality
@@ -627,7 +635,13 @@ def download_image():
 
     fmt = data.get('format', 'jpeg').upper()
     quality = data.get('quality', 95)
-    if fmt == 'JPEG': img = img.convert('RGB')
+    if fmt == 'JPEG':
+        if img.mode in ('RGBA', 'LA', 'P', 'PA'):
+            img = img.convert('RGB')
+        elif img.mode in ('1', 'F', 'I'):
+            img = img.convert('L').convert('RGB')
+        elif img.mode == 'L':
+            img = img.convert('RGB')
 
     buf = io.BytesIO()
     img.save(buf, format=fmt, quality=quality)
