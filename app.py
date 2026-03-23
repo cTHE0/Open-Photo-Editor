@@ -44,10 +44,14 @@ def load_projects():
 def save_projects():
     """Save projects to disk."""
     try:
+        os.makedirs(app.config['PROJECTS_FOLDER'], exist_ok=True)
         with open(PROJECTS_FILE, 'w') as f:
             json.dump(PROJECTS, f)
+        print(f"Saved {len(PROJECTS)} projects to disk")
     except Exception as e:
         print(f"Error saving projects: {e}")
+        # Keep projects in memory if disk save fails
+        pass
 
 # Load projects on startup
 load_projects()
@@ -634,6 +638,7 @@ def new_project():
         'canvas_height': data.get('height', 1080),
         'layers': []
     }
+    print(f"Created project: {project_id}")
     save_projects()
     return jsonify({'success': True, 'project_id': project_id,
                     'width': PROJECTS[project_id]['canvas_width'],
@@ -643,6 +648,7 @@ def new_project():
 @app.route('/api/project/<pid>/layer/add', methods=['POST'])
 def add_layer(pid):
     print(f"Add layer request - Project: {pid}")
+    print(f"Available projects: {list(PROJECTS.keys())}")
     if pid not in PROJECTS:
         print(f"Project not found: {pid}")
         return jsonify({'error': 'Projet non trouvé'}), 404
