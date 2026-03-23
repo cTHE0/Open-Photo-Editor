@@ -72,7 +72,130 @@ const S = {
   _lastUpdate: {},        // Last update data per layer
   _compositeCache: null,  // Cached composite image
   _cacheVersion: 0,       // Increment on layer changes
+  
+  // Undo/Redo history
+  _history: [],           // Stack of state snapshots
+  _historyIndex: -1,      // Current position in history
+  _maxHistory: 50,        // Maximum history states
+  _historyLock: false,    // Prevent history during operations
 };
+
+// ══════════════════════════════════════════════════════════════
+// UNDO/REDO SYSTEM
+// ══════════════════════════════════════════════════════════════
+
+function pushHistory(action = 'edit') {
+  if (S._historyLock || !S.projectId) return;
+  
+  // Remove any future states if we're not at the end
+  if (S._historyIndex < S._history.length - 1) {
+    S._history = S._history.slice(0, S._historyIndex + 1);
+  }
+  
+  // Create snapshot
+  const snapshot = {
+    action: action,
+    layers: JSON.parse(JSON.stringify(S.layers.map(l => {
+      // Only keep essential data, strip large image_data for performance
+      const { image_data, ...rest } = l;
+      return { ...rest, has_image: !!image_data };
+    }))),
+    canvasW: S.canvasW,
+    canvasH: S.canvasH,
+    timestamp: Date.now()
+  };
+  
+  S._history.push(snapshot);
+  S._historyIndex = S._history.length - 1;
+  
+  // Limit history size
+  if (S._history.length > S._maxHistory) {
+    S._history.shift();
+    S._historyIndex--;
+  }
+  
+  updateUndoButton();
+}
+
+function undo() {
+  if (S._historyIndex <= 0 || !S.projectId) {
+    toast('Rien à annuler', 'info');
+    return;
+  }
+  
+  S._historyLock = true;
+  S._historyIndex--;
+  
+  const state = S._history[S._historyIndex];
+  restoreState(state, 'Annulé');
+  
+  S._historyLock = false;
+  updateUndoButton();
+}
+
+function redo() {
+  if (S._historyIndex >= S._history.length - 1 || !S.projectId) {
+    toast('Rien à rétablir', 'info');
+    return;
+  }
+  
+  S._historyLock = true;
+  S._historyIndex++;
+  
+  const state = S._history[S._historyIndex];
+  restoreState(state, 'Rétabli');
+  
+  S._historyLock = false;
+  updateUndoButton();
+}
+
+async function restoreState(state, msg) {
+  busy(true);
+  try {
+    S.canvasW = state.canvasW;
+    S.canvasH = state.canvasH;
+    S.layers = state.layers;
+    
+    // Restore layer images from cache or re-fetch
+    S.layerImages = {};
+    for (const layer of S.layers) {
+      if (layer.has_image && S.layerImages[layer.id]) {
+        // Image still in cache
+      }
+    }
+    
+    // Update UI
+    initScene();
+    renderLayerList();
+    if (S.layers.length > 0) {
+      setActive(S.layers[0].id);
+    }
+    
+    // Sync with server - reload project state
+    await fetch(`/api/project/${S.projectId}/layer/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ layers: S.layers })
+    }).catch(() => {}); // Ignore errors, local state is authoritative
+    
+    toast(msg, 'success');
+  } catch(e) {
+    toast('Erreur undo/redo: ' + e.message, 'error');
+  } finally {
+    busy(false);
+  }
+}
+
+function updateUndoButton() {
+  const undoBtn = $('undoBtn');
+  if (undoBtn) {
+    undoBtn.disabled = S._historyIndex <= 0;
+    undoBtn.textContent = S._historyIndex <= 0 
+      ? '↩ Annuler (Ctrl+Z)' 
+      : `↩ Annuler (${S._historyIndex})`;
+  }
+}
+
 
 // ══════════════════════════════════════════════════════════════
 // SECTION TOGGLES (left panel)
@@ -224,6 +347,10 @@ function initScene() {
   $('mergeBtn').disabled           = false;
   $('flattenBtn').disabled         = false;
 
+  // Initialize history with current state
+  pushHistory('init');
+  updateUndoButton();
+  
   updateRPInfo();
   fitZoom();
 }
@@ -296,6 +423,8 @@ async function addLayerToServer(params) {
   renderLayerList();
   setActive(d.layer.id);
   updateRPInfo();
+  pushHistory('add_layer');
+  updateUndoButton();
   toast('Calque ajouté : ' + d.layer.name, 'success');
   return d.layer;
 }
@@ -341,6 +470,7 @@ async function serverUpdateLayer(id, data, skipCache = false) {
 }
 
 async function deleteLayerFromServer(id) {
+  pushHistory('delete_layer');
   const r = await fetch(`/api/project/${S.projectId}/layer/${id}/delete`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
   });
@@ -352,10 +482,12 @@ async function deleteLayerFromServer(id) {
   renderLayerList();
   updateRPInfo();
   hideSelectedLayerPanel();
+  updateUndoButton();
   toast('Calque supprimé', 'info');
 }
 
 async function duplicateLayerServer(id) {
+  pushHistory('duplicate_layer');
   const r = await fetch(`/api/project/${S.projectId}/layer/${id}/duplicate`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
   });
@@ -1249,6 +1381,8 @@ document.addEventListener('keydown', e => {
     if (e.key === 'o') { e.preventDefault(); $('fileInput').click(); }
     if (e.key === 's') { e.preventDefault(); doExport(); }
     if (e.key === 'p') { e.preventDefault(); saveProject(); }
+    if (e.key === 'z') { e.preventDefault(); undo(); }
+    if (e.key === 'y') { e.preventDefault(); redo(); }
     if (e.key === 'd' && S.activeId) { e.preventDefault(); busy(true); duplicateLayerServer(S.activeId).finally(()=>busy(false)); }
   }
 
