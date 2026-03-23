@@ -343,7 +343,10 @@ def upload_image():
     file_id = str(uuid.uuid4())
     img = Image.open(file.stream).convert('RGBA')
     w, h = img.size
-
+    
+    # Reset stream position for saving
+    file.stream.seek(0)
+    
     path = os.path.join(app.config['UPLOAD_FOLDER'], f"{file_id}.png")
     img.save(path, 'PNG')
 
