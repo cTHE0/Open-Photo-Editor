@@ -52,6 +52,8 @@ def save_projects():
 # Load projects on startup
 load_projects()
 
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff', 'gif'}
+
 # ══════════════════════════════════════════════════════════════
 # IMAGE UTILITIES
 # ══════════════════════════════════════════════════════════════
