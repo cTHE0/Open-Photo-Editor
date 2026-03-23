@@ -1304,6 +1304,85 @@ $('resetLayerStylesBtn').addEventListener('click', () => {
   toast('Effets réinitialisés', 'info');
 });
 
+// ══════════════════════════════════════════════════════════════
+// COLOR PICKER (EYEDROPPER)
+// ══════════════════════════════════════════════════════════════
+
+// Create color picker canvas for sampling
+let _colorPickerCanvas = null;
+let _colorPickerCtx = null;
+
+function getColorPickerCanvas() {
+  if (_colorPickerCanvas) return _colorPickerCanvas;
+  _colorPickerCanvas = document.createElement('canvas');
+  _colorPickerCanvas.width = S.canvasW;
+  _colorPickerCanvas.height = S.canvasH;
+  _colorPickerCtx = _colorPickerCanvas.getContext('2d');
+  return _colorPickerCanvas;
+}
+
+async function sampleColor(canvasX, canvasY) {
+  if (!S.projectId) return;
+  
+  // Draw current composite to color picker canvas
+  const img = $('compositeImg');
+  const cv = getColorPickerCanvas();
+  const ctx = _colorPickerCtx;
+  
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(img, 0, 0, S.canvasW, S.canvasH);
+  
+  // Get pixel color
+  const imageData = ctx.getImageData(Math.floor(canvasX), Math.floor(canvasY), 1, 1).data;
+  const r = imageData[0], g = imageData[1], b = imageData[2], a = imageData[3];
+  
+  // Convert to hex
+  const hex = '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+  
+  // Show color picker notification
+  const colorSwatch = document.createElement('div');
+  colorSwatch.style.cssText = `
+    position:fixed;z-index:1000;padding:8px 12px;background:#1e1e24;
+    border:1px solid #3a3a46;border-radius:6px;display:flex;align-items:center;
+    gap:8px;font-size:11px;color:#ebebf0;pointer-events:none;
+  `;
+  colorSwatch.innerHTML = `
+    <div style="width:20px;height:20px;border-radius:3px;background:${hex};border:1px solid #555"></div>
+    <span>${hex}</span>
+  `;
+  colorSwatch.style.left = (event.clientX + 10) + 'px';
+  colorSwatch.style.top = (event.clientY + 10) + 'px';
+  document.body.appendChild(colorSwatch);
+  
+  // Copy to clipboard
+  try {
+    await navigator.clipboard.writeText(hex);
+    toast(`Couleur ${hex} copiée!`, 'success');
+  } catch(e) {
+    toast(`Couleur: ${hex}`, 'info');
+  }
+  
+  setTimeout(() => colorSwatch.remove(), 2000);
+}
+
+// Handle eyedropper tool click
+$('canvasScene').addEventListener('click', async e => {
+  if (S.tool !== 'eyedropper') return;
+  
+  const bg_targets = [$('canvasBg'), $('compositeImg'), $('canvasScene'), $('viewport'), $('handlesLayer')];
+  if (!bg_targets.includes(e.target)) return;
+  
+  const pt = s2c(e.clientX, e.clientY);
+  
+  // Constrain to canvas bounds
+  if (pt.x < 0 || pt.x >= S.canvasW || pt.y < 0 || pt.y >= S.canvasH) {
+    toast('Cliquez sur le canevas', 'info');
+    return;
+  }
+  
+  await sampleColor(pt.x, pt.y);
+});
+
 // ── Gradient live ─────────────────────────────────────────────
 $('gradAngle').addEventListener('input', e => {
   $('sv-gradAngle').textContent = e.target.value + '°';
@@ -1546,6 +1625,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'v') setTool('select');
   if (e.key === 'c') setTool('crop');
   if (e.key === 'h') setTool('pan');
+  if (e.key === 'i') setTool('eyedropper');
 
   if (e.ctrlKey || e.metaKey) {
     if (e.key === '+' || e.key === '=') { e.preventDefault(); S.zoom=Math.min(S.zoom*1.2,8); applyVP(); }
