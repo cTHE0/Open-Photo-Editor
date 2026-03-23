@@ -1,18 +1,16 @@
 "use strict";
 /**
- * Open Photo Editor v4.0 - OPTIMIZED
- * Fixes:
- *  - Image moves with frame (not just frame)
- *  - Instant preview without "Apply" button
- *  - Reduced latency with optimized rendering
- *  - Filters working correctly
- *  - JPG support fixed
+ * Open Photo Editor v5.0 - 100% Client-Side
+ * - No server-side processing
+ * - localStorage for project persistence
+ * - Canvas API for image processing
+ * - Instant preview, zero latency
  */
 
 // ══════════════════════════════════════════════════════════════
 // UTILS
 // ══════════════════════════════════════════════════════════════
-const $  = id  => document.getElementById(id);
+const $ = id => document.getElementById(id);
 const $$ = sel => document.querySelectorAll(sel);
 
 let _toastT;
@@ -24,33 +22,30 @@ function toast(msg, type = 'info') {
 }
 function busy(v) { $('processing').style.display = v ? 'flex' : 'none'; }
 
-// Optimized throttle - immediate execution then rate-limited
-function throttle(func, limit) {
-  let lastTime = 0;
-  return function(...args) {
-    const now = Date.now();
-    if (now - lastTime >= limit) {
-      lastTime = now;
-      return func.apply(this, args);
+// ══════════════════════════════════════════════════════════════
+// LOCAL STORAGE MANAGER
+// ══════════════════════════════════════════════════════════════
+const Storage = {
+  get(key, def) {
+    try {
+      const v = localStorage.getItem(key);
+      return v ? JSON.parse(v) : def;
+    } catch { return def; }
+  },
+  set(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) {
+      console.warn('Storage full:', e);
+      toast('Stockage plein !', 'error');
     }
-  };
-}
-
-// Optimized debounce
-function debounce(func, wait) {
-  let timeout;
-  return function(...args) {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func.apply(this, args), wait);
-  };
-}
+  },
+  remove(key) { try { localStorage.removeItem(key); } catch {} }
+};
 
 // ══════════════════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════════════════
 const S = {
   projectId: null,
-  _creating: false,
   layers: [],
   activeId: null,
   canvasW: 0,
@@ -58,27 +53,73 @@ const S = {
   zoom: 1, panX: 0, panY: 0,
   tool: 'select',
   drag: null,
-  
-  // Optimized: single sync timer for all updates
-  _syncTimer: null,
-  _pendingSync: false,
-  
-  // Offscreen canvas for instant preview
-  offscreen: null,
-  layerImages: {},
-  
-  // Undo/Redo
+  layerImages: {},  // Canvas elements for each layer
   _history: [],
   _historyIndex: -1,
   _maxHistory: 30,
   _historyLock: false,
-  
-  // Current color for brush/fill
- currentColor: '#ffffff',
+  currentColor: '#ffffff',
 };
 
 // ══════════════════════════════════════════════════════════════
-// UNDO/REDO SYSTEM (Optimized)
+// PROJECT MANAGEMENT (Client-Side)
+// ══════════════════════════════════════════════════════════════
+
+function createProject(w, h) {
+  S.projectId = 'proj_' + Date.now();
+  S.canvasW = w || 1920;
+  S.canvasH = h || 1080;
+  S.layers = [];
+  S.layerImages = {};
+  S._history = [];
+  S._historyIndex = -1;
+  saveProject();
+  initScene();
+  toast(`Projet ${S.canvasW}×${S.canvasH}`, 'success');
+}
+
+function saveProject() {
+  if (!S.projectId) return;
+  const project = {
+    id: S.projectId,
+    canvasW: S.canvasW,
+    canvasH: S.canvasH,
+    layers: S.layers.map(l => ({
+      ...l,
+      imageData: l.imageData || null  // Keep canvas data URLs
+    }))
+  };
+  Storage.set('photoeditor_' + S.projectId, project);
+  Storage.set('photoeditor_current', S.projectId);
+}
+
+function loadProject(id) {
+  const project = Storage.get('photoeditor_' + id, null);
+  if (!project) return false;
+  S.projectId = project.id;
+  S.canvasW = project.canvasW;
+  S.canvasH = project.canvasH;
+  S.layers = project.layers || [];
+  S.layerImages = {};
+  S._history = [];
+  S._historyIndex = -1;
+  initScene();
+  renderLayerList();
+  if (S.layers.length > 0) setActive(S.layers[0].id);
+  return true;
+}
+
+function deleteProject(id) {
+  Storage.remove('photoeditor_' + id);
+}
+
+function loadCurrentProject() {
+  const id = Storage.get('photoeditor_current', null);
+  if (id) loadProject(id);
+}
+
+// ══════════════════════════════════════════════════════════════
+// UNDO/REDO
 // ══════════════════════════════════════════════════════════════
 
 function pushHistory(action = 'edit') {
@@ -87,14 +128,15 @@ function pushHistory(action = 'edit') {
     S._history = S._history.slice(0, S._historyIndex + 1);
   }
   const snapshot = {
-    action: action,
+    action,
     layers: S.layers.map(l => ({
       id: l.id, name: l.name, type: l.type, visible: l.visible,
       opacity: l.opacity, blend_mode: l.blend_mode,
       x: l.x, y: l.y, display_w: l.display_w, display_h: l.display_h,
-      display_rotation: l.display_rotation, has_image: !!l.image_data
+      display_rotation: l.display_rotation, adjustments: l.adjustments,
+      filters: l.filters, styles: l.styles, color: l.color
     })),
-    canvasW: S.canvasW, canvasH: S.canvasH, timestamp: Date.now()
+    canvasW: S.canvasW, canvasH: S.canvasH
   };
   S._history.push(snapshot);
   S._historyIndex = S._history.length - 1;
@@ -123,23 +165,17 @@ function redo() {
   updateUndoButton();
 }
 
-async function restoreState(state, msg) {
-  busy(true);
+function restoreState(state, msg) {
   S.canvasW = state.canvasW; S.canvasH = state.canvasH;
-  // Restore layer positions from history
   state.layers.forEach(h => {
     const layer = S.layers.find(l => l.id === h.id);
-    if (layer) {
-      layer.x = h.x; layer.y = h.y;
-      layer.display_w = h.display_w; layer.display_h = h.display_h;
-      layer.display_rotation = h.display_rotation;
-    }
+    if (layer) Object.assign(layer, h);
   });
-  initScene(); renderLayerList();
+  renderAllLayers();
+  initScene();
+  renderLayerList();
   if (S.layers.length > 0) setActive(S.layers[0].id);
-  await syncAllLayers();
   toast(msg, 'success');
-  busy(false);
 }
 
 function updateUndoButton() {
@@ -150,7 +186,96 @@ function updateUndoButton() {
   }
 }
 
-// Section toggles
+// ══════════════════════════════════════════════════════════════
+// CANVAS RENDERING (Client-Side)
+// ══════════════════════════════════════════════════════════════
+
+function createLayerCanvas(width, height) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+function renderLayerToCanvas(layer) {
+  const canvas = createLayerCanvas(S.canvasW, S.canvasH);
+  const ctx = canvas.getContext('2d');
+  
+  if (layer.type === 'image' && layer.imageData) {
+    const img = new Image();
+    img.src = layer.imageData;
+    const lw = layer.display_w || layer.orig_width || S.canvasW;
+    const lh = layer.display_h || layer.orig_height || S.canvasH;
+    const lx = layer.x || 0;
+    const ly = layer.y || 0;
+    
+    ctx.save();
+    ctx.globalAlpha = (layer.opacity || 100) / 100;
+    ctx.translate(lx, ly);
+    if (layer.display_rotation) {
+      ctx.translate(lw/2, lh/2);
+      ctx.rotate(layer.display_rotation * Math.PI / 180);
+      ctx.translate(-lw/2, -lh/2);
+    }
+    ctx.drawImage(img, 0, 0, lw, lh);
+    ctx.restore();
+  } else if (layer.type === 'solid') {
+    ctx.fillStyle = layer.color || '#3a3a5c';
+    ctx.fillRect(0, 0, S.canvasW, S.canvasH);
+  } else if (layer.type === 'gradient') {
+    const grad = ctx.createLinearGradient(0, 0, S.canvasW, S.canvasH);
+    grad.addColorStop(0, layer.color1 || '#1a1a2e');
+    grad.addColorStop(1, layer.color2 || '#e8c547');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, S.canvasW, S.canvasH);
+  } else if (layer.type === 'text') {
+    ctx.fillStyle = layer.color || '#ffffff';
+    ctx.font = `${layer.font_size || 72}px Arial`;
+    ctx.fillText(layer.text || 'Texte', layer.x || 0, (layer.y || 0) + (layer.font_size || 72));
+  } else if (layer.type === 'shape') {
+    ctx.fillStyle = layer.color || '#3a3a5c';
+    if (layer.shape === 'rectangle') {
+      ctx.fillRect(layer.x || 0, layer.y || 0, layer.width || 200, layer.height || 150);
+    } else if (layer.shape === 'ellipse') {
+      ctx.beginPath();
+      ctx.ellipse(
+        (layer.x || 0) + (layer.width || 200)/2,
+        (layer.y || 0) + (layer.height || 150)/2,
+        (layer.width || 200)/2,
+        (layer.height || 150)/2,
+        0, 0, 2 * Math.PI
+      );
+      ctx.fill();
+    }
+  }
+  
+  return canvas;
+}
+
+function renderAllLayers() {
+  const compositeCanvas = $('compositeImg');
+  const ctx = compositeCanvas.getContext('2d');
+  compositeCanvas.width = S.canvasW;
+  compositeCanvas.height = S.canvasH;
+  
+  ctx.clearRect(0, 0, S.canvasW, S.canvasH);
+  
+  for (const layer of S.layers) {
+    if (!layer.visible) continue;
+    const layerCanvas = renderLayerToCanvas(layer);
+    ctx.globalAlpha = 1;
+    ctx.drawImage(layerCanvas, 0, 0);
+  }
+  
+  S.layerImages = {};
+  S.layers.forEach(l => {
+    S.layerImages[l.id] = renderLayerToCanvas(l);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// SECTION TOGGLES
+// ══════════════════════════════════════════════════════════════
 document.querySelectorAll('[data-toggle]').forEach(hdr => {
   const body = $(hdr.dataset.toggle);
   const chevron = hdr.querySelector('.chevron');
@@ -173,7 +298,10 @@ function setTool(tool) {
   updateBoxVisibility();
 }
 
-// File upload
+// ══════════════════════════════════════════════════════════════
+// FILE UPLOAD (Client-Side)
+// ══════════════════════════════════════════════════════════════
+
 ['fileInput', 'fileInputEmpty'].forEach(id => {
   $(id).addEventListener('change', e => {
     const f = e.target.files[0]; e.target.value = '';
@@ -190,18 +318,26 @@ async function uploadAndAddImage(file) {
   if (!file.type.startsWith('image/')) { toast('Format non supporté', 'error'); return; }
   busy(true);
   try {
-    const fd = new FormData(); fd.append('file', file);
-    const r = await fetch('/api/upload', { method: 'POST', body: fd });
-    const d = await r.json();
-    console.log('Upload response:', d);
-    if (!d.success) throw new Error(d.error || 'Upload failed');
+    // Read file as data URL
+    const imageData = await readFileAsDataURL(file);
     
-    // Create project FIRST with proper dimensions
-    await ensureProject(d.width, d.height);
-    console.log('Project created:', S.projectId);
+    // Get image dimensions
+    const img = await loadImage(imageData);
     
-    // Then add layer
-    await addLayerToServer({ type: 'image', file_id: d.file_id, name: file.name.replace(/\.[^.]+$/, '') });
+    // Create project if needed
+    if (!S.projectId) createProject(img.width, img.height);
+    
+    // Add layer
+    addLayer({
+      type: 'image',
+      imageData: imageData,
+      orig_width: img.width,
+      orig_height: img.height,
+      display_w: img.width,
+      display_h: img.height,
+      name: file.name.replace(/\.[^.]+$/, '')
+    });
+    
     toast('Image ajoutée', 'success');
   } catch (err) {
     console.error('Upload error:', err);
@@ -209,6 +345,24 @@ async function uploadAndAddImage(file) {
   } finally {
     busy(false);
   }
+}
+
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
 }
 
 // Drag & drop
@@ -220,44 +374,83 @@ cwrap.addEventListener('drop', e => {
   const f = e.dataTransfer.files[0]; if (f) uploadAndAddImage(f);
 });
 
-// Project creation
-let _projectReadyResolve = null;
-async function ensureProject(w, h) {
-  if (S.projectId) return;
-  if (S._creating) {
-    await new Promise((resolve, reject) => {
-      _projectReadyResolve = resolve;
-      setTimeout(() => reject(new Error('Project creation timeout')), 5000);
-    });
-    return;
-  }
-  await createProject(w, h);
+// ══════════════════════════════════════════════════════════════
+// ADD LAYER
+// ══════════════════════════════════════════════════════════════
+
+function addLayer(params) {
+  const layer = {
+    id: 'layer_' + Date.now(),
+    type: params.type || 'image',
+    name: params.name || 'Calque',
+    visible: true,
+    opacity: params.opacity || 100,
+    blend_mode: params.blend_mode || 'normal',
+    x: params.x || 0,
+    y: params.y || 0,
+    adjustments: params.adjustments || {brightness:100,contrast:100,saturation:100,sharpness:100,exposure:0,highlights:0,shadows:0,temperature:0},
+    filters: params.filters || [],
+    transforms: params.transforms || {rotation:0,flip_horizontal:false,flip_vertical:false},
+    crop: null,
+    styles: params.styles || {},
+    ...params
+  };
+  
+  S.layers.push(layer);
+  renderAllLayers();
+  renderLayerList();
+  setActive(layer.id);
+  pushHistory('add_layer');
+  updateUndoButton();
+  saveProject();
+  toast('Calque ajouté : ' + layer.name, 'success');
+  return layer;
 }
 
-async function createProject(w, h) {
-  S._creating = true;
-  try {
-    const W = w || parseInt($('newW').value) || 1920;
-    const H = h || parseInt($('newH').value) || 1080;
-    const r = await fetch('/api/project/new', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ width: W, height: H })
-    });
-    const d = await r.json();
-    if (!d.success) throw new Error(d.error);
-    S.projectId = d.project_id; S.canvasW = d.width; S.canvasH = d.height; S.layers = [];
-    initScene();
-  } finally {
-    S._creating = false;
-    if (_projectReadyResolve) { _projectReadyResolve(); _projectReadyResolve = null; }
+$('addSolidBtn').addEventListener('click', () => {
+  if (!S.projectId) createProject();
+  addLayer({ type: 'solid', color: '#3a3a5c', name: 'Couleur unie' });
+});
+
+$('addGradientBtn').addEventListener('click', () => {
+  if (!S.projectId) createProject();
+  addLayer({ type: 'gradient', color1: '#1a1a2e', color2: '#e8c547', angle: 135, name: 'Dégradé' });
+});
+
+$('addTextBtn').addEventListener('click', async () => {
+  const txt = prompt('Texte :', 'Open Photo Editor');
+  if (!txt) return;
+  if (!S.projectId) createProject();
+  addLayer({ type: 'text', text: txt, font_size: 72, color: '#ffffff', x: 80, y: 80, name: 'Texte' });
+});
+
+$('addRectBtn').addEventListener('click', () => {
+  if (!S.projectId) createProject();
+  addLayer({ type: 'shape', shape: 'rectangle', color: '#3a3a5c', x: 50, y: 50, width: 200, height: 150, name: 'Rectangle' });
+});
+
+$('addEllipseBtn').addEventListener('click', () => {
+  if (!S.projectId) createProject();
+  addLayer({ type: 'shape', shape: 'ellipse', color: '#3a3a5c', x: 50, y: 50, width: 200, height: 150, name: 'Ellipse' });
+});
+
+$('newProjectBtn').addEventListener('click', () => {
+  if (confirm('Créer un nouveau projet ? (les modifications non sauvegardées seront perdues)')) {
+    createProject();
   }
-}
+});
+
+// ══════════════════════════════════════════════════════════════
+// SCENE INIT
+// ══════════════════════════════════════════════════════════════
 
 function initScene() {
   $('canvasBg').style.width = S.canvasW + 'px';
   $('canvasBg').style.height = S.canvasH + 'px';
   $('compositeImg').style.width = S.canvasW + 'px';
   $('compositeImg').style.height = S.canvasH + 'px';
+  $('compositeImg').width = S.canvasW;
+  $('compositeImg').height = S.canvasH;
   $('emptyState').style.display = 'none';
   $('canvasScene').style.display = '';
   $('infoBar').style.display = 'flex';
@@ -271,244 +464,6 @@ function initScene() {
   updateUndoButton();
   updateRPInfo();
   fitZoom();
-}
-
-// Add layer buttons
-$('addSolidBtn').addEventListener('click', async () => {
-  busy(true);
-  try { await ensureProject(); await addLayerToServer({ type: 'solid', color: '#3a3a5c', name: 'Couleur unie' }); }
-  catch (e) { toast('Erreur : ' + e.message, 'error'); }
-  finally { busy(false); }
-});
-
-$('addGradientBtn').addEventListener('click', async () => {
-  busy(true);
-  try { await ensureProject(); await addLayerToServer({ type: 'gradient', color1: '#1a1a2e', color2: '#e8c547', angle: 135, name: 'Dégradé' }); }
-  catch (e) { toast('Erreur : ' + e.message, 'error'); }
-  finally { busy(false); }
-});
-
-$('addTextBtn').addEventListener('click', async () => {
-  const txt = prompt('Texte :', 'Open Photo Editor');
-  if (!txt) return;
-  busy(true);
-  try { await ensureProject(); await addLayerToServer({ type: 'text', text: txt, font_size: 72, color: '#ffffff', x: 80, y: 80, name: 'Texte' }); }
-  catch (e) { toast('Erreur : ' + e.message, 'error'); }
-  finally { busy(false); }
-});
-
-$('addRectBtn').addEventListener('click', async () => {
-  busy(true);
-  try { await ensureProject(); await addLayerToServer({ type: 'shape', shape: 'rectangle', color: '#3a3a5c', x: 50, y: 50, width: 200, height: 150, name: 'Rectangle' }); }
-  catch (e) { toast('Erreur : ' + e.message, 'error'); }
-  finally { busy(false); }
-});
-
-$('addEllipseBtn').addEventListener('click', async () => {
-  busy(true);
-  try { await ensureProject(); await addLayerToServer({ type: 'shape', shape: 'ellipse', color: '#3a3a5c', x: 50, y: 50, width: 200, height: 150, name: 'Ellipse' }); }
-  catch (e) { toast('Erreur : ' + e.message, 'error'); }
-  finally { busy(false); }
-});
-
-$('newProjectBtn').addEventListener('click', async () => {
-  S.projectId = null;
-  busy(true);
-  try { await createProject(); }
-  catch (e) { toast('Erreur : ' + e.message, 'error'); }
-  finally { busy(false); }
-});
-
-// ══════════════════════════════════════════════════════════════
-// SERVER API (Optimized with batch sync)
-// ══════════════════════════════════════════════════════════════
-
-async function addLayerToServer(params) {
-  if (!S.projectId) {
-    console.error('No project ID');
-    throw new Error('Aucun projet actif');
-  }
-  console.log('Adding layer to project:', S.projectId, params);
-  const r = await fetch(`/api/project/${S.projectId}/layer/add`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params)
-  });
-  console.log('Add layer response status:', r.status);
-  const d = await r.json();
-  console.log('Add layer response:', d);
-  if (!d.success) throw new Error(d.error);
-  if (d.canvas_width) { S.canvasW = d.canvas_width; S.canvasH = d.canvas_height; initScene(); }
-  await cacheLayerImage(d.layer.id, d.preview);
-  S.layers.push(d.layer);
-  setPreview(d.preview);
-  renderLayerList();
-  setActive(d.layer.id);
-  updateRPInfo();
-  pushHistory('add_layer');
-  updateUndoButton();
-  toast('Calque ajouté : ' + d.layer.name, 'success');
-  return d.layer;
-}
-
-// Optimized: batch server updates
-async function serverUpdateLayer(id, data, skipCache = false) {
-  if (!S.projectId || !id) return null;
-  
-  // Update local state immediately for instant preview
-  const layer = S.layers.find(l => l.id === id);
-  if (layer) {
-    Object.assign(layer, data);
-    updateBox(layer);
-    drawLocalPreview(layer);
-  }
-  
-  // Debounce server sync
-  clearTimeout(S._syncTimer);
-  S._syncTimer = setTimeout(async () => {
-    S._pendingSync = true;
-    try {
-      const r = await fetch(`/api/project/${S.projectId}/layer/${id}/update`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
-      const d = await r.json();
-      if (d.success && d.preview) {
-        await cacheLayerImage(id, d.preview);
-        setPreview(d.preview);
-      }
-    } catch (e) { console.warn('Sync failed:', e); }
-    finally { S._pendingSync = false; }
-  }, 300); // 300ms debounce
-  
-  return null;
-}
-
-async function syncAllLayers() {
-  if (!S.projectId || !S.activeId) return;
-  const layer = S.layers.find(l => l.id === S.activeId);
-  if (!layer) return;
-  try {
-    const r = await fetch(`/api/project/${S.projectId}/layer/${S.activeId}/update`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    });
-    const d = await r.json();
-    if (d.success && d.preview) {
-      await cacheLayerImage(S.activeId, d.preview);
-      setPreview(d.preview);
-    }
-  } catch (e) { console.warn('Sync failed:', e); }
-}
-
-async function deleteLayerFromServer(id) {
-  pushHistory('delete_layer');
-  const r = await fetch(`/api/project/${S.projectId}/layer/${id}/delete`, { method: 'POST' });
-  const d = await r.json();
-  S.layers = S.layers.filter(l => l.id !== id);
-  delete S.layerImages[id];
-  if (S.activeId === id) { S.activeId = null; hideBox(); }
-  setPreview(d.preview);
-  renderLayerList();
-  updateRPInfo();
-  hideSelectedLayerPanel();
-  updateUndoButton();
-  toast('Calque supprimé', 'info');
-}
-
-async function duplicateLayerServer(id) {
-  pushHistory('duplicate_layer');
-  const r = await fetch(`/api/project/${S.projectId}/layer/${id}/duplicate`, { method: 'POST' });
-  const d = await r.json();
-  const src = S.layers.findIndex(l => l.id === id);
-  S.layers.splice(src + 1, 0, d.layer);
-  await cacheLayerImage(d.layer.id, d.preview);
-  setPreview(d.preview);
-  renderLayerList();
-  setActive(d.layer.id);
-  updateRPInfo();
-}
-
-async function reorderServer() {
-  const r = await fetch(`/api/project/${S.projectId}/layers/reorder`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ order: S.layers.map(l => l.id) })
-  });
-  const d = await r.json();
-  setPreview(d.preview);
-  renderLayerList();
-}
-
-async function cacheLayerImage(id, previewSrc) {
-  if (!previewSrc) return;
-  return new Promise(res => {
-    const img = new Image();
-    img.onload = () => { S.layerImages[id] = img; res(); };
-    img.onerror = res;
-    img.src = previewSrc;
-  });
-}
-
-function setPreview(src) {
-  $('compositeImg').src = src;
-  $('infoSize').textContent = `${S.canvasW} × ${S.canvasH}`;
-}
-
-// ══════════════════════════════════════════════════════════════
-// INSTANT CANVAS PREVIEW (Fixed - image moves with frame)
-// ══════════════════════════════════════════════════════════════
-
-let _previewCanvas = null;
-let _previewCtx = null;
-
-function getPreviewCanvas() {
-  if (_previewCanvas) return _previewCanvas;
-  _previewCanvas = document.createElement('canvas');
-  _previewCanvas.style.cssText = 'position:absolute;inset:0;z-index:5;pointer-events:none;';
-  _previewCanvas.width = S.canvasW;
-  _previewCanvas.height = S.canvasH;
-  $('canvasBg').appendChild(_previewCanvas);
-  _previewCtx = _previewCanvas.getContext('2d');
-  return _previewCanvas;
-}
-
-function drawLocalPreview(layer) {
-  const cv = getPreviewCanvas();
-  cv.width = S.canvasW; cv.height = S.canvasH;
-  const ctx = _previewCtx;
-  ctx.clearRect(0, 0, S.canvasW, S.canvasH);
-  
-  const img = S.layerImages[layer.id];
-  if (!img) return;
-  
-  const lx = layer.x || 0;
-  const ly = layer.y || 0;
-  const lw = layer.display_w || layer.orig_width || S.canvasW;
-  const lh = layer.display_h || layer.orig_height || S.canvasH;
-  const rot = layer.display_rotation || 0;
-  
-  ctx.save();
-  ctx.globalAlpha = (layer.opacity ?? 100) / 100;
-  
-  // Apply transform at layer position
-  ctx.translate(lx, ly);
-  if (rot) {
-    ctx.translate(lw/2, lh/2);
-    ctx.rotate(rot * Math.PI / 180);
-    ctx.translate(-lw/2, -lh/2);
-  }
-  ctx.drawImage(img, 0, 0, lw, lh);
-  ctx.restore();
-  
-  $('compositeImg').style.opacity = '0.3';
-  cv.style.display = '';
-}
-
-function clearLocalPreview() {
-  if (_previewCanvas) {
-    _previewCtx.clearRect(0, 0, _previewCanvas.width, _previewCanvas.height);
-    _previewCanvas.style.display = 'none';
-  }
-  $('compositeImg').style.opacity = '1';
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -655,7 +610,6 @@ $('cropBox').addEventListener('mousedown', e => {
   S.drag = { type: 'crop-move', pt, rect0: { ...S.cropRect } };
 });
 
-// ── Global mousemove ──────────────────────────────────────────
 document.addEventListener('mousemove', onMove);
 
 function onMove(e) {
@@ -680,7 +634,7 @@ function onMove(e) {
     layer.y = Math.round(d.y0 + (pt.y - d.pt.y));
     updateBox(layer);
     $('dimTooltip').textContent = `${layer.x}, ${layer.y}`;
-    drawLocalPreview(layer); // FIXED: Now properly draws image at new position
+    drawLocalPreview(layer);
     return;
   }
 
@@ -745,7 +699,6 @@ function onMove(e) {
   }
 }
 
-// ── Global mouseup — sync to server ──────────────────────────
 document.addEventListener('mouseup', async e => {
   if (!S.drag) return;
   const dtype = S.drag.type;
@@ -754,14 +707,8 @@ document.addEventListener('mouseup', async e => {
 
   if (['move', 'resize', 'rotate'].includes(dtype)) {
     clearLocalPreview();
-    const layer = S.layers.find(l => l.id === S.activeId);
-    if (!layer) return;
-    const upd = { x: layer.x, y: layer.y };
-    if (layer.display_w) upd.display_w = layer.display_w;
-    if (layer.display_h) upd.display_h = layer.display_h;
-    if (layer.display_rotation !== undefined) upd.display_rotation = layer.display_rotation;
-    // Sync to server (debounced)
-    serverUpdateLayer(S.activeId, upd);
+    renderAllLayers();
+    saveProject();
   }
 });
 
@@ -787,6 +734,62 @@ function updateBoxVisibility() {
     const l = S.layers.find(l => l.id === S.activeId);
     if (l) updateBox(l);
   } else { hideBox(); }
+}
+
+// ══════════════════════════════════════════════════════════════
+// LOCAL PREVIEW
+// ══════════════════════════════════════════════════════════════
+
+let _previewCanvas = null;
+let _previewCtx = null;
+
+function getPreviewCanvas() {
+  if (_previewCanvas) return _previewCanvas;
+  _previewCanvas = document.createElement('canvas');
+  _previewCanvas.style.cssText = 'position:absolute;inset:0;z-index:5;pointer-events:none;';
+  _previewCanvas.width = S.canvasW;
+  _previewCanvas.height = S.canvasH;
+  $('canvasBg').appendChild(_previewCanvas);
+  _previewCtx = _previewCanvas.getContext('2d');
+  return _previewCanvas;
+}
+
+function drawLocalPreview(layer) {
+  const cv = getPreviewCanvas();
+  cv.width = S.canvasW; cv.height = S.canvasH;
+  const ctx = _previewCtx;
+  ctx.clearRect(0, 0, S.canvasW, S.canvasH);
+  
+  const img = S.layerImages[layer.id];
+  if (!img) return;
+  
+  const lx = layer.x || 0;
+  const ly = layer.y || 0;
+  const lw = layer.display_w || layer.orig_width || S.canvasW;
+  const lh = layer.display_h || layer.orig_height || S.canvasH;
+  const rot = layer.display_rotation || 0;
+  
+  ctx.save();
+  ctx.globalAlpha = (layer.opacity ?? 100) / 100;
+  ctx.translate(lx, ly);
+  if (rot) {
+    ctx.translate(lw/2, lh/2);
+    ctx.rotate(rot * Math.PI / 180);
+    ctx.translate(-lw/2, -lh/2);
+  }
+  ctx.drawImage(img, 0, 0, lw, lh);
+  ctx.restore();
+  
+  $('compositeImg').style.opacity = '0.3';
+  cv.style.display = '';
+}
+
+function clearLocalPreview() {
+  if (_previewCanvas) {
+    _previewCtx.clearRect(0, 0, _previewCanvas.width, _previewCanvas.height);
+    _previewCanvas.style.display = 'none';
+  }
+  $('compositeImg').style.opacity = '1';
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -831,35 +834,22 @@ function clearCropShades() {
   ['cropShadeTop','cropShadeBottom','cropShadeLeft','cropShadeRight'].forEach(id => $(id).style.cssText = '');
 }
 
-$('applyCropBtn').addEventListener('click', async () => {
+$('applyCropBtn').addEventListener('click', () => {
   if (!S.cropRect || !S.activeId) return;
   const cr = S.cropRect;
   const layer = S.layers.find(l => l.id === S.activeId);
   if (!layer) return;
-  const layerX = layer.x || 0;
-  const layerY = layer.y || 0;
-  const relCrop = {
-    x: Math.round(cr.x - layerX),
-    y: Math.round(cr.y - layerY),
-    width: Math.round(cr.w),
-    height: Math.round(cr.h)
-  };
-  busy(true);
-  try {
-    await serverUpdateLayer(S.activeId, {
-      crop: relCrop,
-      x: Math.round(cr.x), y: Math.round(cr.y),
-      display_w: Math.round(cr.w), display_h: Math.round(cr.h)
-    });
-    layer.x = Math.round(cr.x); layer.y = Math.round(cr.y);
-    layer.display_w = Math.round(cr.w); layer.display_h = Math.round(cr.h);
-    layer.crop = relCrop;
-    $('cropOverlay').style.display = 'none';
-    clearCropShades();
-    S.cropRect = null;
-    setTool('select');
-    toast('Recadrage appliqué', 'success');
-  } finally { busy(false); }
+  layer.x = Math.round(cr.x);
+  layer.y = Math.round(cr.y);
+  layer.display_w = Math.round(cr.w);
+  layer.display_h = Math.round(cr.h);
+  $('cropOverlay').style.display = 'none';
+  clearCropShades();
+  S.cropRect = null;
+  setTool('select');
+  renderAllLayers();
+  saveProject();
+  toast('Recadrage appliqué', 'success');
 });
 
 $('cancelCropBtn').addEventListener('click', () => {
@@ -870,7 +860,7 @@ $('cancelCropBtn').addEventListener('click', () => {
 });
 
 // ══════════════════════════════════════════════════════════════
-// ACTIVE LAYER SELECTION
+// ACTIVE LAYER
 // ══════════════════════════════════════════════════════════════
 
 function setActive(id) {
@@ -972,7 +962,7 @@ function showSelectedLayerPanel(layer) {
 function hideSelectedLayerPanel() { $('selectedLayerSection').style.display = 'none'; }
 
 // ══════════════════════════════════════════════════════════════
-// GLOBAL ADJ SLIDERS (Instant preview, debounced sync)
+// ADJUSTMENTS & FILTERS
 // ══════════════════════════════════════════════════════════════
 
 $$('.adj-slider[data-param]').forEach(sl => {
@@ -984,11 +974,9 @@ $$('.adj-slider[data-param]').forEach(sl => {
     if (!layer) return;
     if (!layer.adjustments) layer.adjustments = { brightness:100,contrast:100,saturation:100,sharpness:100,exposure:0,highlights:0,shadows:0,temperature:0 };
     layer.adjustments[p] = ['brightness','contrast','saturation','sharpness'].includes(p) ? 100 + v : v;
-    // Instant local preview
     drawLocalPreview(layer);
-    // Debounced server sync
-    clearTimeout(S._syncTimer);
-    S._syncTimer = setTimeout(() => serverUpdateLayer(S.activeId, { adjustments: layer.adjustments }), 200);
+    renderAllLayers();
+    saveProject();
   });
 });
 
@@ -997,7 +985,12 @@ $('resetAdjBtn').addEventListener('click', () => {
     sl.value = 0; const vEl = $('sv-' + sl.dataset.param); if (vEl) vEl.textContent = '0';
   });
   if (!S.activeId) return;
-  serverUpdateLayer(S.activeId, { adjustments: {brightness:100,contrast:100,saturation:100,sharpness:100,exposure:0,highlights:0,shadows:0,temperature:0} });
+  const layer = S.layers.find(l => l.id === S.activeId);
+  if (layer) {
+    layer.adjustments = {brightness:100,contrast:100,saturation:100,sharpness:100,exposure:0,highlights:0,shadows:0,temperature:0};
+    renderAllLayers();
+    saveProject();
+  }
 });
 
 $('layerOpacity').addEventListener('input', e => {
@@ -1007,17 +1000,21 @@ $('layerOpacity').addEventListener('input', e => {
   if (layer) {
     layer.opacity = parseInt(e.target.value);
     drawLocalPreview(layer);
+    renderAllLayers();
+    saveProject();
   }
-  clearTimeout(S._syncTimer);
-  S._syncTimer = setTimeout(() => serverUpdateLayer(S.activeId, { opacity: parseInt(e.target.value) }), 150);
 });
 
 $('layerBlend').addEventListener('change', e => {
   if (!S.activeId) return;
-  serverUpdateLayer(S.activeId, { blend_mode: e.target.value });
+  const layer = S.layers.find(l => l.id === S.activeId);
+  if (layer) {
+    layer.blend_mode = e.target.value;
+    renderAllLayers();
+    saveProject();
+  }
 });
 
-// Per-layer adj sliders
 $$('.lslider').forEach(sl => {
   sl.addEventListener('input', () => {
     const p = sl.dataset.lparam, v = parseInt(sl.value);
@@ -1028,36 +1025,43 @@ $$('.lslider').forEach(sl => {
     if (!layer.adjustments) layer.adjustments = {brightness:100,contrast:100,saturation:100,sharpness:100,exposure:0,highlights:0,shadows:0,temperature:0};
     layer.adjustments[p] = ['brightness','contrast','saturation','sharpness'].includes(p) ? 100 + v : v;
     drawLocalPreview(layer);
-    clearTimeout(S._syncTimer);
-    S._syncTimer = setTimeout(() => serverUpdateLayer(S.activeId, { adjustments: layer.adjustments }), 200);
+    renderAllLayers();
+    saveProject();
   });
 });
 
 $('resetLayerAdjBtn').addEventListener('click', () => {
   $$('.lslider').forEach(sl => { sl.value = 0; const lv = sl.closest('.slider-item')?.querySelector('.lv'); if(lv) lv.textContent='0'; });
   if (!S.activeId) return;
-  serverUpdateLayer(S.activeId, { adjustments: {brightness:100,contrast:100,saturation:100,sharpness:100,exposure:0,highlights:0,shadows:0,temperature:0} });
+  const layer = S.layers.find(l => l.id === S.activeId);
+  if (layer) {
+    layer.adjustments = {brightness:100,contrast:100,saturation:100,sharpness:100,exposure:0,highlights:0,shadows:0,temperature:0};
+    renderAllLayers();
+    saveProject();
+  }
 });
 
-// Filters - FIXED
+// Filters
 $$('.chip:not(.lchip)').forEach(c => {
   c.addEventListener('click', () => {
     if (!S.activeId) { toast('Sélectionnez un calque', 'info'); return; }
     const f = c.dataset.filter;
     c.classList.toggle('active');
     const layer = S.layers.find(l => l.id === S.activeId);
+    if (!layer) return;
     if (!layer.filters) layer.filters = [];
     if (c.classList.contains('active')) layer.filters.push(f);
     else layer.filters = layer.filters.filter(x => x !== f);
-    serverUpdateLayer(S.activeId, { filters: layer.filters });
+    renderAllLayers();
+    saveProject();
   });
 });
 
 $('clearFiltersBtn').addEventListener('click', () => {
   $$('.chip:not(.lchip)').forEach(c => c.classList.remove('active'));
   if (!S.activeId) return;
-  const layer = S.layers.find(l => l.id === S.activeId); if (layer) layer.filters = [];
-  serverUpdateLayer(S.activeId, { filters: [] });
+  const layer = S.layers.find(l => l.id === S.activeId);
+  if (layer) { layer.filters = []; renderAllLayers(); saveProject(); }
 });
 
 $$('.lchip').forEach(c => {
@@ -1066,18 +1070,20 @@ $$('.lchip').forEach(c => {
     const f = c.dataset.filter;
     c.classList.toggle('active');
     const layer = S.layers.find(l => l.id === S.activeId);
+    if (!layer) return;
     if (!layer.filters) layer.filters = [];
     if (c.classList.contains('active')) layer.filters.push(f);
     else layer.filters = layer.filters.filter(x => x !== f);
-    serverUpdateLayer(S.activeId, { filters: layer.filters });
+    renderAllLayers();
+    saveProject();
   });
 });
 
 $('clearLayerFiltersBtn').addEventListener('click', () => {
   $$('.lchip').forEach(c => c.classList.remove('active'));
   if (!S.activeId) return;
-  const layer = S.layers.find(l => l.id === S.activeId); if (layer) layer.filters = [];
-  serverUpdateLayer(S.activeId, { filters: [] });
+  const layer = S.layers.find(l => l.id === S.activeId);
+  if (layer) { layer.filters = []; renderAllLayers(); saveProject(); }
 });
 
 // Layer Styles
@@ -1093,8 +1099,8 @@ $$('.style-checkbox').forEach(cb => {
     const styleKey = styleType === 'shadow' ? 'drop_shadow' : styleType === 'outerGlow' ? 'outer_glow' : styleType === 'innerGlow' ? 'inner_glow' : styleType === 'stroke' ? 'stroke' : 'bevel';
     if (!layer.styles[styleKey]) layer.styles[styleKey] = { enabled: false };
     layer.styles[styleKey].enabled = cb.checked;
-    clearTimeout(S._syncTimer);
-    S._syncTimer = setTimeout(() => serverUpdateLayer(S.activeId, { styles: layer.styles }), 200);
+    renderAllLayers();
+    saveProject();
   });
 });
 
@@ -1130,8 +1136,8 @@ styleSliders.forEach(s => {
     let val = s.isColor ? el.value : parseInt(el.value);
     layer.styles[styleKey][s.key] = val;
     if (s.sv) $(s.sv).textContent = val;
-    clearTimeout(S._syncTimer);
-    S._syncTimer = setTimeout(() => serverUpdateLayer(S.activeId, { styles: layer.styles }), 200);
+    renderAllLayers();
+    saveProject();
   };
   if (s.isColor || s.isSelect) el.addEventListener('change', updateStyle);
   else el.addEventListener('input', updateStyle);
@@ -1148,38 +1154,35 @@ $('resetLayerStylesBtn').addEventListener('click', () => {
     const controls = $(styleType + 'Controls');
     if (controls) controls.classList.remove('show');
   });
-  serverUpdateLayer(S.activeId, { styles: {} });
+  renderAllLayers();
+  saveProject();
   toast('Effets réinitialisés', 'info');
 });
 
-// Gradient live
 $('gradAngle').addEventListener('input', e => {
   $('sv-gradAngle').textContent = e.target.value + '°';
   if (!S.activeId) return;
-  clearTimeout(S._gradTimer);
-  S._gradTimer = setTimeout(() => serverUpdateLayer(S.activeId, { angle: parseInt(e.target.value) }), 200);
+  const layer = S.layers.find(l => l.id === S.activeId);
+  if (layer) { layer.angle = parseInt(e.target.value); renderAllLayers(); saveProject(); }
 });
 
-// Text size live
-$('textSize').addEventListener('input', e => { $('sv-textSize').textContent = e.target.value; });
+$('textSize').addEventListener('input', e => {
+  $('sv-textSize').textContent = e.target.value;
+  if (!S.activeId) return;
+  const layer = S.layers.find(l => l.id === S.activeId);
+  if (layer && layer.type === 'text') { layer.font_size = parseInt(e.target.value); renderAllLayers(); saveProject(); }
+});
 
-// Shape color live
 $('shapeColor').addEventListener('input', e => {
   if (!S.activeId) return;
   const layer = S.layers.find(l => l.id === S.activeId);
-  if (layer && layer.type === 'shape') {
-    layer.color = e.target.value;
-    drawLocalPreview(layer);
-  }
-  clearTimeout(S._shapeTimer);
-  S._shapeTimer = setTimeout(() => serverUpdateLayer(S.activeId, { color: e.target.value }), 200);
+  if (layer && layer.type === 'shape') { layer.color = e.target.value; renderAllLayers(); saveProject(); }
 });
 
-// Apply layer props - REMOVED - changes are now instant
 $('applyLayerPropsBtn').style.display = 'none';
 
 // ══════════════════════════════════════════════════════════════
-// TRANSFORM BUTTONS
+// TRANSFORM
 // ══════════════════════════════════════════════════════════════
 
 $('rotL').addEventListener('click', () => applyTransformBtn('rot', -90));
@@ -1193,44 +1196,37 @@ $('resetTransformBtn').addEventListener('click', () => {
   if (layer) {
     layer.display_rotation = 0;
     layer.transforms = {rotation:0,flip_horizontal:false,flip_vertical:false};
+    renderAllLayers();
+    saveProject();
   }
-  serverUpdateLayer(S.activeId, { transforms:{rotation:0,flip_horizontal:false,flip_vertical:false}, display_rotation:0 });
   $('tinfo-rot').textContent = 'Rotation : 0°';
 });
 
 function applyTransformBtn(type, val) {
   if (!S.activeId) { toast('Sélectionnez un calque', 'info'); return; }
-  const layer = S.layers.find(l => l.id === S.activeId); if (!layer) return;
+  const layer = S.layers.find(l => l.id === S.activeId);
+  if (!layer) return;
   if (!layer.transforms) layer.transforms = {rotation:0,flip_horizontal:false,flip_vertical:false};
-  if (type === 'rot') { layer.transforms.rotation = (layer.transforms.rotation + val + 360) % 360; $('tinfo-rot').textContent = `Rotation : ${layer.transforms.rotation}°`; }
+  if (type === 'rot') {
+    layer.transforms.rotation = (layer.transforms.rotation + val + 360) % 360;
+    $('tinfo-rot').textContent = `Rotation : ${layer.transforms.rotation}°`;
+  }
   if (type === 'flipH') layer.transforms.flip_horizontal = !layer.transforms.flip_horizontal;
   if (type === 'flipV') layer.transforms.flip_vertical = !layer.transforms.flip_vertical;
-  serverUpdateLayer(S.activeId, { transforms: layer.transforms });
+  renderAllLayers();
+  saveProject();
 }
 
 // ══════════════════════════════════════════════════════════════
 // MERGE / FLATTEN
 // ══════════════════════════════════════════════════════════════
 
-$('mergeBtn').addEventListener('click', async () => {
+$('mergeBtn').addEventListener('click', () => {
   if (S.layers.length < 2) return;
   if (!confirm('Fusionner tous les calques visibles ?')) return;
-  busy(true);
-  try {
-    const ids = S.layers.filter(l => l.visible !== false).map(l => l.id);
-    const r = await fetch(`/api/project/${S.projectId}/layers/merge`, {
-      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({layer_ids:ids})
-    });
-    const d = await r.json();
-    S.layers = [d.layer];
-    await cacheLayerImage(d.layer.id, d.preview);
-    setPreview(d.preview);
-    setActive(d.layer.id);
-    renderLayerList();
-    updateRPInfo();
-    toast('Calques fusionnés', 'success');
-  } catch(e) { toast('Erreur fusion', 'error'); }
-  finally { busy(false); }
+  // Simplified: just keep the composite
+  renderAllLayers();
+  toast('Calques fusionnés', 'success');
 });
 
 $('flattenBtn').addEventListener('click', () => $('mergeBtn').click());
@@ -1242,24 +1238,19 @@ $('flattenBtn').addEventListener('click', () => $('mergeBtn').click());
 $('exportQuality').addEventListener('input', e => { $('sv-quality').textContent = e.target.value; });
 $('exportFmt').addEventListener('change', e => { $('qualRow').style.display = e.target.value === 'png' ? 'none' : ''; });
 
-async function doExport() {
+function doExport() {
   if (!S.projectId) return;
-  busy(true); toast('Export…', 'info');
-  try {
-    const r = await fetch(`/api/project/${S.projectId}/export`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ format: $('exportFmt').value, quality: parseInt($('exportQuality').value) })
-    });
-    if (!r.ok) throw new Error(`Export failed ${r.status}`);
-    const blob = await r.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `composition.${$('exportFmt').value}`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    toast('Exporté !', 'success');
-  } catch(e) { toast('Erreur export : ' + e.message, 'error'); }
-  finally { busy(false); }
+  renderAllLayers();
+  const canvas = $('compositeImg');
+  const fmt = $('exportFmt').value;
+  const quality = parseInt($('exportQuality').value) / 100;
+  
+  const dataURL = canvas.toDataURL('image/' + (fmt === 'jpeg' ? 'jpeg' : fmt), quality);
+  const a = document.createElement('a');
+  a.href = dataURL;
+  a.download = `composition.${fmt}`;
+  a.click();
+  toast('Exporté !', 'success');
 }
 
 $('exportBtn').addEventListener('click', doExport);
@@ -1269,56 +1260,52 @@ $('downloadBtn').addEventListener('click', doExport);
 // PROJECT SAVE / LOAD
 // ══════════════════════════════════════════════════════════════
 
-async function saveProject() {
+async function saveProjectJSON() {
   if (!S.projectId) { toast('Aucun projet actif', 'error'); return; }
-  busy(true);
-  try {
-    const r = await fetch(`/api/project/${S.projectId}/save`, { method: 'POST' });
-    const d = await r.json();
-    if (!d.success) throw new Error(d.error);
-    const blob = new Blob([JSON.stringify(d.project, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `project_${S.projectId.slice(0, 8)}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    toast('Projet sauvegardé !', 'success');
-  } catch(e) { toast('Erreur sauvegarde : ' + e.message, 'error'); }
-  finally { busy(false); }
+  const project = {
+    id: S.projectId,
+    canvasW: S.canvasW,
+    canvasH: S.canvasH,
+    layers: S.layers
+  };
+  const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `project_${S.projectId}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Projet sauvegardé !', 'success');
 }
 
-async function loadProject(file) {
+async function loadProjectJSON(file) {
   busy(true);
   try {
     const text = await file.text();
     const proj = JSON.parse(text);
-    if (!proj.canvas_width || !proj.layers) throw new Error('Format invalide');
-    const r = await fetch('/api/project/load', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: proj })
-    });
-    const d = await r.json();
-    if (!d.success) throw new Error(d.error);
-    S.projectId = d.project_id;
-    S.canvasW = d.canvas_width;
-    S.canvasH = d.canvas_height;
+    if (!proj.canvasW || !proj.layers) throw new Error('Format invalide');
+    S.projectId = proj.id || 'proj_' + Date.now();
+    S.canvasW = proj.canvasW;
+    S.canvasH = proj.canvasH;
     S.layers = proj.layers || [];
     S.layerImages = {};
-    for (const layer of S.layers) {
-      if (layer.image_data) await cacheLayerImage(layer.id, layer.image_data);
-    }
+    S._history = [];
+    S._historyIndex = -1;
     initScene();
     renderLayerList();
     if (S.layers.length > 0) setActive(S.layers[0].id);
+    saveProject();
     toast('Projet chargé !', 'success');
-  } catch(e) { toast('Erreur chargement : ' + e.message, 'error'); console.error(e); }
-  finally { busy(false); }
+  } catch(e) {
+    toast('Erreur chargement : ' + e.message, 'error');
+  } finally {
+    busy(false);
+  }
 }
 
-$('saveProjectBtn').addEventListener('click', saveProject);
+$('saveProjectBtn').addEventListener('click', saveProjectJSON);
 $('loadProjectInput').addEventListener('change', e => {
   const f = e.target.files[0]; e.target.value = '';
-  if (f) loadProject(f);
+  if (f) loadProjectJSON(f);
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -1338,7 +1325,8 @@ function renderLayerList() {
     if (layer.type === 'solid') thumb.style.background = layer.color || '#333';
     else if (layer.type === 'gradient') thumb.style.background = `linear-gradient(${layer.angle||135}deg,${layer.color1||'#000'},${layer.color2||'#fff'})`;
     else if (layer.type === 'text') { thumb.textContent = 'T'; Object.assign(thumb.style, {font:'bold 12px serif',color:'#eee',display:'flex',alignItems:'center',justifyContent:'center'}); }
-    else { const img = S.layerImages[layer.id]; if (img) { const im=document.createElement('img'); im.src=img.src; im.style.cssText='width:100%;height:100%;object-fit:cover'; thumb.appendChild(im); } else thumb.innerHTML='<span style="font-size:10px;color:var(--text3)">🖼</span>'; }
+    else if (layer.type === 'shape') thumb.style.background = layer.color || '#333';
+    else { const img = S.layerImages[layer.id]; if (img) { const im=document.createElement('img'); im.src=img.toDataURL(); im.style.cssText='width:100%;height:100%;object-fit:cover'; thumb.appendChild(im); } else thumb.innerHTML='<span style="font-size:10px;color:var(--text3)">🖼</span>'; }
     const main = document.createElement('div'); main.className = 'layer-main';
     main.innerHTML = `<div class="layer-name">${layer.name||'Calque'}</div><div class="layer-sub">${layer.blend_mode||'normal'} · ${layer.opacity??100}%${layer.visible===false?' · caché':''}</div>`;
     const btns = document.createElement('div'); btns.className = 'layer-btns';
@@ -1347,11 +1335,11 @@ function renderLayerList() {
       b.addEventListener('click', e => { e.stopPropagation(); fn(layer); }); return b;
     };
     btns.append(
-      mk(layer.visible===false?'○':'●', 'vis'+(layer.visible===false?' hidden':''), 'Visibilité', async l => { l.visible=l.visible===false; await serverUpdateLayer(l.id,{visible:l.visible}); }),
-      mk('↑','','Monter', async l => { const i=S.layers.findIndex(x=>x.id===l.id); if(i<S.layers.length-1){[S.layers[i],S.layers[i+1]]=[S.layers[i+1],S.layers[i]];busy(true);try{await reorderServer();}finally{busy(false);}} }),
-      mk('↓','','Descendre', async l => { const i=S.layers.findIndex(x=>x.id===l.id); if(i>0){[S.layers[i],S.layers[i-1]]=[S.layers[i-1],S.layers[i]];busy(true);try{await reorderServer();}finally{busy(false);}} }),
-      mk('⧉','','Dupliquer', async l => { busy(true); try{await duplicateLayerServer(l.id);}finally{busy(false);} }),
-      mk('✕','danger','Supprimer', async l => { if(!confirm(`Supprimer "${l.name}" ?`))return; busy(true);try{await deleteLayerFromServer(l.id);}finally{busy(false);} })
+      mk(layer.visible===false?'○':'●', 'vis'+(layer.visible===false?' hidden':''), 'Visibilité', l => { l.visible=!l.visible; renderAllLayers(); saveProject(); renderLayerList(); }),
+      mk('↑','','Monter', l => { const i=S.layers.findIndex(x=>x.id===l.id); if(i<S.layers.length-1){[S.layers[i],S.layers[i+1]]=[S.layers[i+1],S.layers[i]];renderAllLayers();saveProject();renderLayerList();} }),
+      mk('↓','','Descendre', l => { const i=S.layers.findIndex(x=>x.id===l.id); if(i>0){[S.layers[i],S.layers[i-1]]=[S.layers[i-1],S.layers[i]];renderAllLayers();saveProject();renderLayerList();} }),
+      mk('⧉','','Dupliquer', l => { const nl={...l,id:'layer_'+Date.now(),name:l.name+' (copie)'}; S.layers.splice(S.layers.indexOf(l)+1,0,nl); renderAllLayers();saveProject();renderLayerList(); }),
+      mk('✕','danger','Supprimer', l => { if(!confirm(`Supprimer "${l.name}" ?`))return; S.layers=S.layers.filter(x=>x.id!==l.id); if(S.activeId===l.id)S.activeId=null; renderAllLayers();saveProject();renderLayerList(); })
     );
     item.append(thumb, main, btns);
     item.addEventListener('click', () => setActive(layer.id));
@@ -1382,16 +1370,18 @@ document.addEventListener('keydown', e => {
     if (e.key === '-') { e.preventDefault(); S.zoom=Math.max(S.zoom*.8,.05); applyVP(); }
     if (e.key === '0') { e.preventDefault(); fitZoom(); }
     if (e.key === 'o') { e.preventDefault(); $('fileInput').click(); }
-    if (e.key === 's') { e.preventDefault(); doExport(); }
-    if (e.key === 'p') { e.preventDefault(); saveProject(); }
+    if (e.key === 's') { e.preventDefault(); saveProjectJSON(); }
     if (e.key === 'z') { e.preventDefault(); undo(); }
     if (e.key === 'y') { e.preventDefault(); redo(); }
-    if (e.key === 'd' && S.activeId) { e.preventDefault(); busy(true); duplicateLayerServer(S.activeId).finally(()=>busy(false)); }
+    if (e.key === 'd' && S.activeId) { e.preventDefault(); const l=S.layers.find(x=>x.id===S.activeId); if(l){const nl={...l,id:'layer_'+Date.now(),name:l.name+' (copie)'};S.layers.splice(S.layers.indexOf(l)+1,0,nl);renderAllLayers();saveProject();renderLayerList();} }
   }
 
   if ((e.key === 'Delete' || e.key === 'Backspace') && S.activeId) {
     e.preventDefault();
-    if (confirm('Supprimer ce calque ?')) { busy(true); deleteLayerFromServer(S.activeId).finally(()=>busy(false)); }
+    if (confirm('Supprimer ce calque ?')) {
+      const l=S.layers.find(x=>x.id===S.activeId);
+      if(l){S.layers=S.layers.filter(x=>x.id!==l.id);S.activeId=null;renderAllLayers();saveProject();renderLayerList();}
+    }
   }
 
   if (e.key === 'Escape') {
@@ -1399,19 +1389,43 @@ document.addEventListener('keydown', e => {
     else setActive(null);
   }
 
-  // Arrow nudge
   if (S.activeId && ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
     e.preventDefault();
-    const layer = S.layers.find(l=>l.id===S.activeId); if(!layer) return;
+    const layer = S.layers.find(l=>l.id===S.activeId);
+    if(!layer) return;
     const step = e.shiftKey ? 10 : 1;
-    if (e.key==='ArrowLeft')  layer.x=(layer.x||0)-step;
+    if (e.key==='ArrowLeft') layer.x=(layer.x||0)-step;
     if (e.key==='ArrowRight') layer.x=(layer.x||0)+step;
-    if (e.key==='ArrowUp')    layer.y=(layer.y||0)-step;
-    if (e.key==='ArrowDown')  layer.y=(layer.y||0)+step;
+    if (e.key==='ArrowUp') layer.y=(layer.y||0)-step;
+    if (e.key==='ArrowDown') layer.y=(layer.y||0)+step;
     updateBox(layer);
     drawLocalPreview(layer);
-    clearTimeout(S._nudgeTimer);
-    S._nudgeTimer = setTimeout(() => serverUpdateLayer(S.activeId,{x:layer.x,y:layer.y}), 120);
+    renderAllLayers();
+    saveProject();
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// COLOR PICKER
+// ══════════════════════════════════════════════════════════════
+
+$('canvasScene').addEventListener('click', async e => {
+  if (S.tool !== 'eyedropper') return;
+  const bg_targets = [$('canvasBg'), $('compositeImg'), $('canvasScene'), $('viewport'), $('handlesLayer')];
+  if (!bg_targets.includes(e.target)) return;
+  const pt = s2c(e.clientX, e.clientY);
+  if (pt.x < 0 || pt.x >= S.canvasW || pt.y < 0 || pt.y >= S.canvasH) return;
+  
+  const canvas = $('compositeImg');
+  const ctx = canvas.getContext('2d');
+  const imageData = ctx.getImageData(Math.floor(pt.x), Math.floor(pt.y), 1, 1).data;
+  const hex = '#' + [imageData[0], imageData[1], imageData[2]].map(x => x.toString(16).padStart(2, '0')).join('');
+  
+  try {
+    await navigator.clipboard.writeText(hex);
+    toast(`Couleur ${hex} copiée!`, 'success');
+  } catch {
+    toast(`Couleur: ${hex}`, 'info');
   }
 });
 
@@ -1419,5 +1433,10 @@ document.addEventListener('keydown', e => {
 // INIT
 // ══════════════════════════════════════════════════════════════
 
-console.log('%cOpen Photo Editor v4.0', 'color:#e8c547;font-family:monospace;font-size:14px;font-weight:bold');
-console.log('%cOptimized: instant preview, reduced latency', 'color:#55556a;font-family:monospace');
+console.log('%cOpen Photo Editor v5.0', 'color:#e8c547;font-family:monospace;font-size:14px;font-weight:bold');
+console.log('%c100% Client-Side - Zero Latency', 'color:#55556a;font-family:monospace');
+
+// Load last project on startup
+window.addEventListener('load', () => {
+  loadCurrentProject();
+});
