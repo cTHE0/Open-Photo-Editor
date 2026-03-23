@@ -525,17 +525,22 @@ def merge_layers(pid):
     ids     = data.get('layer_ids', [])
     if len(ids) < 2: return jsonify({'error': 'Need ≥2 layers'}), 400
 
-    # Build a sub-project with only those layers
+    # Get layers to merge in their current order
+    layers_to_merge = [l for l in project['layers'] if l['id'] in ids]
+    if len(layers_to_merge) < 2:
+        return jsonify({'error': 'Need ≥2 existing layers'}), 400
+
+    # Build a sub-project with only those layers (preserving order)
     sub = {
         'canvas_width':  project['canvas_width'],
         'canvas_height': project['canvas_height'],
-        'layers': [l for l in project['layers'] if l['id'] in ids]
+        'layers': layers_to_merge
     }
     merged_img = composite_layers(sub, 1.0)
     b64 = image_to_base64(merged_img, 'PNG')
 
-    # Replace layers with merged one
-    first_idx = min(project['layers'].index(l) for l in project['layers'] if l['id'] in ids)
+    # Replace layers with merged one - insert at position of first merged layer
+    first_idx = next(i for i, l in enumerate(project['layers']) if l['id'] in ids)
     project['layers'] = [l for l in project['layers'] if l['id'] not in ids]
     merged_layer = {
         'id':   str(uuid.uuid4())[:8],
