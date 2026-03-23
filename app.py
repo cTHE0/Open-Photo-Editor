@@ -272,8 +272,9 @@ def composite_layers(project, scale=1.0):
         # Display size override (from mouse resize)
         display_w = layer.get('display_w')
         display_h = layer.get('display_h')
-        if display_w and display_h and (display_w != limg.width or display_h != limg.height):
-            limg = limg.resize((max(1, int(display_w)), max(1, int(display_h))), Image.LANCZOS)
+        if display_w is not None and display_h is not None:
+            if display_w != limg.width or display_h != limg.height:
+                limg = limg.resize((max(1, int(display_w)), max(1, int(display_h))), Image.LANCZOS)
 
         # Display rotation override (from mouse rotate)
         display_rotation = layer.get('display_rotation', 0)
