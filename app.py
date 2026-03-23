@@ -609,10 +609,14 @@ def new_project():
 # ── Add layer ─────────────────────────────────────────────────
 @app.route('/api/project/<pid>/layer/add', methods=['POST'])
 def add_layer(pid):
-    if pid not in PROJECTS: return jsonify({'error': 'Not found'}), 404
+    print(f"Add layer request - Project: {pid}")
+    if pid not in PROJECTS:
+        print(f"Project not found: {pid}")
+        return jsonify({'error': 'Projet non trouvé'}), 404
     project = PROJECTS[pid]
     data    = request.get_json() or {}
     ltype   = data.get('type', 'image')
+    print(f"Layer type: {ltype}, data: {data}")
 
     layer = {
         'id':         str(uuid.uuid4())[:8],
@@ -629,14 +633,17 @@ def add_layer(pid):
         'filters':    [],
         'transforms': {'rotation':0,'flip_horizontal':False,'flip_vertical':False},
         'crop':       None,
-        'styles':     {},  # Layer styles (drop shadow, stroke, glow, bevel)
+        'styles':     {},
     }
 
     if ltype == 'image':
         fid = data.get('file_id')
+        print(f"Image layer - file_id: {fid}")
         if fid:
             p = os.path.join(app.config['UPLOAD_FOLDER'], f"{fid}.png")
+            print(f"Looking for file at: {p}")
             if os.path.exists(p):
+                print(f"File found, loading...")
                 img = Image.open(p).convert('RGBA')
                 layer['image_data'] = f"data:image/png;base64,{image_to_base64(img,'PNG')}"
                 layer['orig_width']  = img.width
@@ -644,32 +651,30 @@ def add_layer(pid):
                 if not project['layers']:
                     project['canvas_width']  = img.width
                     project['canvas_height'] = img.height
+            else:
+                print(f"File not found at: {p}")
         elif not layer.get('image_data'):
             layer['image_data'] = data.get('image_data', '')
-            # If image_data provided directly, extract dimensions from it
             if layer['image_data']:
                 try:
                     img = base64_to_image(layer['image_data'])
                     layer['orig_width'] = img.width
                     layer['orig_height'] = img.height
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"Error loading image_data: {e}")
 
     elif ltype == 'solid':
         layer['color'] = data.get('color', '#3a3a5c')
-
     elif ltype == 'gradient':
         layer['color1'] = data.get('color1', '#1a1a2e')
         layer['color2'] = data.get('color2', '#e8c547')
         layer['angle']  = data.get('angle', 135)
-
     elif ltype == 'text':
         layer['text']      = data.get('text', 'Votre texte')
         layer['font_size'] = data.get('font_size', 72)
         layer['color']     = data.get('color', '#ffffff')
         layer['x']         = data.get('x', 80)
         layer['y']         = data.get('y', 80)
-
     elif ltype == 'shape':
         layer['shape']  = data.get('shape', 'rectangle')
         layer['color']  = data.get('color', '#3a3a5c')
@@ -679,6 +684,7 @@ def add_layer(pid):
         layer['height'] = data.get('height', 150)
 
     project['layers'].append(layer)
+    print(f"Layer added, total layers: {len(project['layers'])}")
 
     comp = composite_layers(project, get_scale(project))
     return jsonify({

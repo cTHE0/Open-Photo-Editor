@@ -193,11 +193,22 @@ async function uploadAndAddImage(file) {
     const fd = new FormData(); fd.append('file', file);
     const r = await fetch('/api/upload', { method: 'POST', body: fd });
     const d = await r.json();
-    if (!d.success) throw new Error(d.error);
+    console.log('Upload response:', d);
+    if (!d.success) throw new Error(d.error || 'Upload failed');
+    
+    // Create project FIRST with proper dimensions
     await ensureProject(d.width, d.height);
+    console.log('Project created:', S.projectId);
+    
+    // Then add layer
     await addLayerToServer({ type: 'image', file_id: d.file_id, name: file.name.replace(/\.[^.]+$/, '') });
-  } catch (err) { toast('Erreur : ' + err.message, 'error'); console.error(err); }
-  finally { busy(false); }
+    toast('Image ajoutée', 'success');
+  } catch (err) {
+    console.error('Upload error:', err);
+    toast('Erreur : ' + err.message, 'error');
+  } finally {
+    busy(false);
+  }
 }
 
 // Drag & drop
@@ -313,12 +324,18 @@ $('newProjectBtn').addEventListener('click', async () => {
 // ══════════════════════════════════════════════════════════════
 
 async function addLayerToServer(params) {
-  if (!S.projectId) throw new Error('No active project');
+  if (!S.projectId) {
+    console.error('No project ID');
+    throw new Error('Aucun projet actif');
+  }
+  console.log('Adding layer to project:', S.projectId, params);
   const r = await fetch(`/api/project/${S.projectId}/layer/add`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params)
   });
+  console.log('Add layer response status:', r.status);
   const d = await r.json();
+  console.log('Add layer response:', d);
   if (!d.success) throw new Error(d.error);
   if (d.canvas_width) { S.canvasW = d.canvas_width; S.canvasH = d.canvas_height; initScene(); }
   await cacheLayerImage(d.layer.id, d.preview);
