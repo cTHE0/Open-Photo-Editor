@@ -644,6 +644,13 @@ function onMove(e) {
     if (hs.includes('s')) h = Math.max(10, d.rect0.h + dy);
     if (hs.includes('w')) { x = d.rect0.x + dx; w = Math.max(10, d.rect0.w - dx); }
     if (hs.includes('n')) { y = d.rect0.y + dy; h = Math.max(10, d.rect0.h - dy); }
+    
+    // Constrain to canvas bounds
+    x = Math.max(0, Math.min(x, S.canvasW - 10));
+    y = Math.max(0, Math.min(y, S.canvasH - 10));
+    w = Math.max(10, Math.min(w, S.canvasW - x));
+    h = Math.max(10, Math.min(h, S.canvasH - y));
+    
     S.cropRect = { x, y, w, h };
     drawCropUI(); return;
   }
