@@ -7,6 +7,7 @@ All processing is local — no third-party services.
 import os
 import uuid
 import copy
+import json
 import numpy as np
 from flask import Flask, render_template, request, jsonify, send_file
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageDraw, ImageFont, ImageChops
@@ -16,11 +17,40 @@ import base64
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024  # 64MB max
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+app.config['PROJECTS_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'projects')
 
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff', 'gif'}
+# Ensure folders exist
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+os.makedirs(app.config['PROJECTS_FOLDER'], exist_ok=True)
 
-# In-memory project store  { project_id: project_dict }
+# In-memory project store with disk persistence
 PROJECTS = {}
+PROJECTS_FILE = os.path.join(app.config['PROJECTS_FOLDER'], 'projects.json')
+
+def load_projects():
+    """Load projects from disk."""
+    global PROJECTS
+    if os.path.exists(PROJECTS_FILE):
+        try:
+            with open(PROJECTS_FILE, 'r') as f:
+                PROJECTS = json.load(f)
+            print(f"Loaded {len(PROJECTS)} projects from disk")
+        except Exception as e:
+            print(f"Error loading projects: {e}")
+            PROJECTS = {}
+    else:
+        PROJECTS = {}
+
+def save_projects():
+    """Save projects to disk."""
+    try:
+        with open(PROJECTS_FILE, 'w') as f:
+            json.dump(PROJECTS, f)
+    except Exception as e:
+        print(f"Error saving projects: {e}")
+
+# Load projects on startup
+load_projects()
 
 # ══════════════════════════════════════════════════════════════
 # IMAGE UTILITIES
@@ -602,6 +632,7 @@ def new_project():
         'canvas_height': data.get('height', 1080),
         'layers': []
     }
+    save_projects()
     return jsonify({'success': True, 'project_id': project_id,
                     'width': PROJECTS[project_id]['canvas_width'],
                     'height': PROJECTS[project_id]['canvas_height']})
@@ -685,6 +716,7 @@ def add_layer(pid):
 
     project['layers'].append(layer)
     print(f"Layer added, total layers: {len(project['layers'])}")
+    save_projects()
 
     comp = composite_layers(project, get_scale(project))
     return jsonify({
@@ -712,6 +744,7 @@ def update_layer(pid, lid):
         if field in data:
             layer[field] = data[field]
 
+    save_projects()
     comp = composite_layers(project, get_scale(project))
     return jsonify({
         'success': True,
@@ -725,6 +758,7 @@ def delete_layer(pid, lid):
     if pid not in PROJECTS: return jsonify({'error': 'Not found'}), 404
     project = PROJECTS[pid]
     project['layers'] = [l for l in project['layers'] if l['id'] != lid]
+    save_projects()
     comp = composite_layers(project, get_scale(project))
     return jsonify({'success': True,
                     'preview': f"data:image/png;base64,{image_to_base64(comp,'PNG')}"})
@@ -737,6 +771,7 @@ def reorder_layers(pid):
     order   = request.get_json().get('order', [])
     lmap    = {l['id']: l for l in project['layers']}
     project['layers'] = [lmap[i] for i in order if i in lmap]
+    save_projects()
     comp = composite_layers(project, get_scale(project))
     return jsonify({'success': True,
                     'preview': f"data:image/png;base64,{image_to_base64(comp,'PNG')}"})
@@ -754,6 +789,7 @@ def duplicate_layer(pid, lid):
     nl['name'] = layer['name'] + ' (copie)'
     idx = project['layers'].index(layer)
     project['layers'].insert(idx+1, nl)
+    save_projects()
 
     comp = composite_layers(project, get_scale(project))
     return jsonify({
@@ -802,6 +838,7 @@ def merge_layers(pid):
         'orig_height': project['canvas_height'],
     }
     project['layers'].insert(first_idx, merged_layer)
+    save_projects()
 
     comp = composite_layers(project, get_scale(project))
     return jsonify({
@@ -866,16 +903,17 @@ def load_project():
     data = request.get_json()
     if not data or 'project' not in data:
         return jsonify({'error': 'No project data'}), 400
-    
+
     proj = data['project']
     project_id = str(uuid.uuid4())
-    
+
     PROJECTS[project_id] = {
         'canvas_width': proj.get('canvas_width', 1920),
         'canvas_height': proj.get('canvas_height', 1080),
         'layers': proj.get('layers', [])
     }
-    
+    save_projects()
+
     return jsonify({
         'success': True,
         'project_id': project_id,
