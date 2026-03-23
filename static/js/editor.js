@@ -1031,6 +1031,63 @@ function showSelectedLayerPanel(layer) {
   });
 
   $$('.lchip').forEach(c => c.classList.toggle('active', (layer.filters || []).includes(c.dataset.filter)));
+  
+  // Load layer styles
+  const styles = layer.styles || {};
+  
+  // Drop shadow
+  const ds = styles.drop_shadow || {};
+  $('shadowEnabled').checked = !!ds.enabled;
+  $('shadowControls').classList.toggle('show', !!ds.enabled);
+  $('shadowColor').value = ds.color || '#000000';
+  $('shadowOpacity').value = ds.opacity || 50;
+  $('sv-shadowOpacity').textContent = ds.opacity || 50;
+  $('shadowOffset').value = ds.offset || 10;
+  $('sv-shadowOffset').textContent = ds.offset || 10;
+  $('shadowBlur').value = ds.blur || 10;
+  $('sv-shadowBlur').textContent = ds.blur || 10;
+  
+  // Stroke
+  const stroke = styles.stroke || {};
+  $('strokeEnabled').checked = !!stroke.enabled;
+  $('strokeControls').classList.toggle('show', !!stroke.enabled);
+  $('strokeColor').value = stroke.color || '#000000';
+  $('strokeOpacity').value = stroke.opacity || 100;
+  $('sv-strokeOpacity').textContent = stroke.opacity || 100;
+  $('strokeSize').value = stroke.size || 3;
+  $('sv-strokeSize').textContent = stroke.size || 3;
+  $('strokePosition').value = stroke.position || 'outside';
+  
+  // Outer glow
+  const og = styles.outer_glow || {};
+  $('outerGlowEnabled').checked = !!og.enabled;
+  $('outerGlowControls').classList.toggle('show', !!og.enabled);
+  $('outerGlowColor').value = og.color || '#ffffff';
+  $('outerGlowOpacity').value = og.opacity || 50;
+  $('sv-outerGlowOpacity').textContent = og.opacity || 50;
+  $('outerGlowSize').value = og.size || 10;
+  $('sv-outerGlowSize').textContent = og.size || 10;
+  
+  // Inner glow
+  const ig = styles.inner_glow || {};
+  $('innerGlowEnabled').checked = !!ig.enabled;
+  $('innerGlowControls').classList.toggle('show', !!ig.enabled);
+  $('innerGlowColor').value = ig.color || '#ffffff';
+  $('innerGlowOpacity').value = ig.opacity || 50;
+  $('sv-innerGlowOpacity').textContent = ig.opacity || 50;
+  $('innerGlowSize').value = ig.size || 10;
+  $('sv-innerGlowSize').textContent = ig.size || 10;
+  
+  // Bevel
+  const bevel = styles.bevel || {};
+  $('bevelEnabled').checked = !!bevel.enabled;
+  $('bevelControls').classList.toggle('show', !!bevel.enabled);
+  $('bevelOpacity').value = bevel.opacity || 50;
+  $('sv-bevelOpacity').textContent = bevel.opacity || 50;
+  $('bevelSize').value = bevel.size || 5;
+  $('sv-bevelSize').textContent = bevel.size || 5;
+  $('bevelAngle').value = bevel.angle || 135;
+  $('sv-bevelAngle').textContent = bevel.angle || 135;
 }
 
 function hideSelectedLayerPanel() { $('selectedLayerSection').style.display = 'none'; }
@@ -1129,6 +1186,122 @@ $('clearLayerFiltersBtn').addEventListener('click', () => {
   if (!S.activeId) return;
   const layer = S.layers.find(l => l.id === S.activeId); if (layer) layer.filters = [];
   serverUpdateLayer(S.activeId, { filters: [] });
+});
+
+// ══════════════════════════════════════════════════════════════
+// LAYER STYLES
+// ══════════════════════════════════════════════════════════════
+
+// Style checkbox toggles
+$$('.style-checkbox').forEach(cb => {
+  cb.addEventListener('change', () => {
+    if (!S.activeId) return;
+    const layer = S.layers.find(l => l.id === S.activeId);
+    if (!layer) return;
+    if (!layer.styles) layer.styles = {};
+    
+    const styleType = cb.id.replace('Enabled', '');
+    const controls = $(styleType + 'Controls');
+    if (controls) controls.classList.toggle('show', cb.checked);
+    
+    const styleKey = styleType === 'shadow' ? 'drop_shadow' : 
+                     styleType === 'outerGlow' ? 'outer_glow' :
+                     styleType === 'innerGlow' ? 'inner_glow' :
+                     styleType === 'stroke' ? 'stroke' : 'bevel';
+    
+    if (!layer.styles[styleKey]) layer.styles[styleKey] = { enabled: false };
+    layer.styles[styleKey].enabled = cb.checked;
+    
+    clearTimeout(S._styleTimer);
+    S._styleTimer = setTimeout(() => serverUpdateLayer(S.activeId, { styles: layer.styles }), 200);
+  });
+});
+
+// Style sliders
+const styleSliders = [
+  { id: 'shadowOpacity', sv: 'sv-shadowOpacity', style: 'drop_shadow', key: 'opacity', scale: 1 },
+  { id: 'shadowOffset', sv: 'sv-shadowOffset', style: 'drop_shadow', key: 'offset', scale: 1 },
+  { id: 'shadowBlur', sv: 'sv-shadowBlur', style: 'drop_shadow', key: 'blur', scale: 1 },
+  { id: 'shadowColor', sv: null, style: 'drop_shadow', key: 'color', scale: 1, isColor: true },
+  { id: 'strokeOpacity', sv: 'sv-strokeOpacity', style: 'stroke', key: 'opacity', scale: 1 },
+  { id: 'strokeSize', sv: 'sv-strokeSize', style: 'stroke', key: 'size', scale: 1 },
+  { id: 'strokeColor', sv: null, style: 'stroke', key: 'color', scale: 1, isColor: true },
+  { id: 'strokePosition', sv: null, style: 'stroke', key: 'position', scale: 1, isSelect: true },
+  { id: 'outerGlowOpacity', sv: 'sv-outerGlowOpacity', style: 'outer_glow', key: 'opacity', scale: 1 },
+  { id: 'outerGlowSize', sv: 'sv-outerGlowSize', style: 'outer_glow', key: 'size', scale: 1 },
+  { id: 'outerGlowColor', sv: null, style: 'outer_glow', key: 'color', scale: 1, isColor: true },
+  { id: 'innerGlowOpacity', sv: 'sv-innerGlowOpacity', style: 'inner_glow', key: 'opacity', scale: 1 },
+  { id: 'innerGlowSize', sv: 'sv-innerGlowSize', style: 'inner_glow', key: 'size', scale: 1 },
+  { id: 'innerGlowColor', sv: null, style: 'inner_glow', key: 'color', scale: 1, isColor: true },
+  { id: 'bevelOpacity', sv: 'sv-bevelOpacity', style: 'bevel', key: 'opacity', scale: 1 },
+  { id: 'bevelSize', sv: 'sv-bevelSize', style: 'bevel', key: 'size', scale: 1 },
+  { id: 'bevelAngle', sv: 'sv-bevelAngle', style: 'bevel', key: 'angle', scale: 1 },
+];
+
+styleSliders.forEach(s => {
+  const el = $(s.id);
+  if (!el) return;
+  
+  const updateStyle = () => {
+    if (!S.activeId) return;
+    const layer = S.layers.find(l => l.id === S.activeId);
+    if (!layer || !layer.styles) return;
+    
+    const styleKey = s.style;
+    if (!layer.styles[styleKey]) layer.styles[styleKey] = {};
+    
+    let val = s.isColor ? el.value : parseInt(el.value);
+    layer.styles[styleKey][s.key] = val;
+    
+    if (s.sv) $(s.sv).textContent = val;
+    
+    clearTimeout(S._styleTimer);
+    S._styleTimer = setTimeout(() => serverUpdateLayer(S.activeId, { styles: layer.styles }), 200);
+  };
+  
+  if (s.isColor || s.isSelect) {
+    el.addEventListener('change', updateStyle);
+  } else {
+    el.addEventListener('input', updateStyle);
+  }
+});
+
+$('resetLayerStylesBtn').addEventListener('click', () => {
+  if (!S.activeId) return;
+  const layer = S.layers.find(l => l.id === S.activeId);
+  if (!layer) return;
+  
+  layer.styles = {};
+  layer.styles = {};
+  
+  // Reset UI
+  $$('.style-checkbox').forEach(cb => {
+    cb.checked = false;
+    const styleType = cb.id.replace('Enabled', '');
+    const controls = $(styleType + 'Controls');
+    if (controls) controls.classList.remove('show');
+  });
+  
+  // Reset sliders to defaults
+  const defaults = {
+    shadowOpacity: 50, shadowOffset: 10, shadowBlur: 10, shadowColor: '#000000',
+    strokeOpacity: 100, strokeSize: 3, strokeColor: '#000000', strokePosition: 'outside',
+    outerGlowOpacity: 50, outerGlowSize: 10, outerGlowColor: '#ffffff',
+    innerGlowOpacity: 50, innerGlowSize: 10, innerGlowColor: '#ffffff',
+    bevelOpacity: 50, bevelSize: 5, bevelAngle: 135
+  };
+  
+  for (const [id, val] of Object.entries(defaults)) {
+    const el = $(id);
+    if (el) {
+      el.value = val;
+      const sv = $('sv-' + id.replace(/([A-Z])/g, '$1').replace('Opacity', 'Opacity').replace('Size', 'Size').replace('Offset', 'Offset').replace('Blur', 'Blur').replace('Color', '').replace('Position', '').replace('Angle', 'Angle'));
+      if (sv && !id.includes('Color') && !id.includes('Position')) sv.textContent = val;
+    }
+  }
+  
+  serverUpdateLayer(S.activeId, { styles: {} });
+  toast('Effets réinitialisés', 'info');
 });
 
 // ── Gradient live ─────────────────────────────────────────────

@@ -9,7 +9,7 @@ import uuid
 import copy
 import numpy as np
 from flask import Flask, render_template, request, jsonify, send_file
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageDraw, ImageFont
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageDraw, ImageFont, ImageChops
 import io
 import base64
 
@@ -202,6 +202,187 @@ def blend_mode(base, over, mode):
 
 # ── Layer renderers ───────────────────────────────────────────
 
+def apply_layer_styles(img, styles):
+    """Apply layer effects: drop shadow, stroke, glow, bevel."""
+    if not styles:
+        return img
+    
+    result = img.convert('RGBA')
+    
+    # Drop Shadow
+    if styles.get('drop_shadow', {}).get('enabled'):
+        ds = styles['drop_shadow']
+        shadow_offset = ds.get('offset', 10)
+        shadow_blur = ds.get('blur', 10)
+        shadow_color = ds.get('color', '#000000')
+        shadow_opacity = ds.get('opacity', 50) / 100.0
+        
+        # Parse shadow color
+        if shadow_color.startswith('#'):
+            sr, sg, sb = int(shadow_color[1:3], 16), int(shadow_color[3:5], 16), int(shadow_color[5:7], 16)
+        else:
+            sr, sg, sb = 0, 0, 0
+        
+        # Create shadow mask from alpha channel
+        alpha = result.split()[3]
+        shadow_mask = alpha.point(lambda x: int(x * shadow_opacity))
+        shadow = Image.new('RGBA', result.size, (sr, sg, sb, 0))
+        shadow.paste((sr, sg, sb, int(255 * shadow_opacity)), mask=shadow_mask)
+        
+        # Apply blur to shadow
+        if shadow_blur > 0:
+            shadow = shadow.filter(ImageFilter.GaussianBlur(radius=shadow_blur))
+        
+        # Offset shadow
+        shadow_layer = Image.new('RGBA', result.size, (0, 0, 0, 0))
+        shadow_layer.paste(shadow, (shadow_offset, shadow_offset))
+        
+        # Composite shadow below result
+        result = Image.alpha_composite(shadow_layer, result)
+    
+    # Outer Glow
+    if styles.get('outer_glow', {}).get('enabled'):
+        glow = styles['outer_glow']
+        glow_color = glow.get('color', '#ffffff')
+        glow_size = glow.get('size', 10)
+        glow_opacity = glow.get('opacity', 50) / 100.0
+        glow_spread = glow.get('spread', 0) / 100.0
+        
+        if glow_color.startswith('#'):
+            gr, gg, gb = int(glow_color[1:3], 16), int(glow_color[3:5], 16), int(glow_color[5:7], 16)
+        else:
+            gr, gg, gb = 255, 255, 255
+        
+        alpha = result.split()[3]
+        glow_mask = alpha.point(lambda x: 255 - x)  # Invert alpha for outer glow
+        
+        if glow_spread > 0:
+            glow_mask = glow_mask.filter(ImageFilter.GaussianBlur(radius=glow_size * (1 - glow_spread)))
+        else:
+            glow_mask = glow_mask.filter(ImageFilter.GaussianBlur(radius=glow_size))
+        
+        glow_layer = Image.new('RGBA', result.size, (gr, gg, gb, 0))
+        glow_layer.putalpha(glow_mask.point(lambda x: int(x * glow_opacity)))
+        result = Image.alpha_composite(glow_layer, result)
+    
+    # Inner Glow
+    if styles.get('inner_glow', {}).get('enabled'):
+        glow = styles['inner_glow']
+        glow_color = glow.get('color', '#ffffff')
+        glow_size = glow.get('size', 10)
+        glow_opacity = glow.get('opacity', 50) / 100.0
+        
+        if glow_color.startswith('#'):
+            gr, gg, gb = int(glow_color[1:3], 16), int(glow_color[3:5], 16), int(glow_color[5:7], 16)
+        else:
+            gr, gg, gb = 255, 255, 255
+        
+        # Create inner glow mask
+        alpha = result.split()[3]
+        alpha_blur = alpha.filter(ImageFilter.GaussianBlur(radius=glow_size))
+        inner_mask = alpha.point(lambda x: 255 - x)
+        inner_mask = ImageChops.subtract(inner_mask, alpha_blur)
+        inner_mask = inner_mask.point(lambda x: max(0, min(255, int(x * glow_opacity))))
+        
+        glow_layer = Image.new('RGBA', result.size, (0, 0, 0, 0))
+        glow_layer.paste((gr, gg, gb), mask=inner_mask)
+        result = Image.alpha_composite(glow_layer, result)
+    
+    # Stroke
+    if styles.get('stroke', {}).get('enabled'):
+        stroke = styles['stroke']
+        stroke_size = stroke.get('size', 3)
+        stroke_color = stroke.get('color', '#000000')
+        stroke_opacity = stroke.get('opacity', 100) / 100.0
+        stroke_position = stroke.get('position', 'outside')  # outside, inside, center
+        
+        if stroke_color.startswith('#'):
+            str_r, str_g, str_b = int(stroke_color[1:3], 16), int(stroke_color[3:5], 16), int(stroke_color[5:7], 16)
+        else:
+            str_r, str_g, str_b = 0, 0, 0
+        
+        alpha = result.split()[3]
+        
+        # Create stroke mask (edge detection)
+        alpha_arr = np.array(alpha, dtype=np.float32) / 255.0
+        
+        # Dilate and erode for stroke
+        from PIL import ImageFilter
+        if stroke_position == 'outside':
+            stroke_mask = alpha.filter(ImageFilter.MaxFilter(stroke_size * 2 + 1))
+            stroke_mask = ImageChops.subtract(stroke_mask, alpha)
+        elif stroke_position == 'inside':
+            eroded = alpha.filter(ImageFilter.MinFilter(stroke_size * 2 + 1))
+            stroke_mask = ImageChops.subtract(alpha, eroded)
+        else:  # center
+            dilated = alpha.filter(ImageFilter.MaxFilter(stroke_size + 1))
+            eroded = alpha.filter(ImageFilter.MinFilter(stroke_size + 1))
+            stroke_mask = ImageChops.subtract(dilated, eroded)
+        
+        stroke_mask = stroke_mask.point(lambda x: int(x * stroke_opacity))
+        
+        stroke_layer = Image.new('RGBA', result.size, (0, 0, 0, 0))
+        stroke_layer.paste((str_r, str_g, str_b), mask=stroke_mask)
+        
+        # Composite stroke based on position
+        if stroke_position == 'outside':
+            result = Image.alpha_composite(stroke_layer, result)
+        else:
+            result = Image.alpha_composite(stroke_layer, result)
+    
+    # Bevel/Emboss
+    if styles.get('bevel', {}).get('enabled'):
+        bevel = styles['bevel']
+        bevel_size = bevel.get('size', 5)
+        bevel_opacity = bevel.get('opacity', 50) / 100.0
+        bevel_angle = bevel.get('angle', 135)
+        bevel_height = bevel.get('height', 5)
+        
+        # Convert to numpy for emboss calculation
+        arr = np.array(result, dtype=np.float32)
+        alpha = arr[:, :, 3] / 255.0
+        
+        # Create emboss kernel
+        import math
+        angle_rad = math.radians(bevel_angle)
+        light_x = math.cos(angle_rad)
+        light_y = math.sin(angle_rad)
+        
+        # Sobel filters for normal calculation
+        sobel_x = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
+        sobel_y = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=np.float32)
+        
+        from scipy import ndimage
+        try:
+            gx = ndimage.convolve(alpha, sobel_x)
+            gy = ndimage.convolve(alpha, sobel_y)
+            
+            # Calculate lighting
+            dzdx = gx * bevel_height
+            dzdy = gy * bevel_height
+            
+            # Normalize
+            magnitude = np.sqrt(dzdx**2 + dzdy**2 + 1)
+            nx = -dzdx / magnitude
+            ny = -dzdy / magnitude
+            nz = 1 / magnitude
+            
+            # Dot product with light direction
+            lighting = nx * light_x + ny * light_y + nz * 0.5
+            lighting = np.clip(lighting * bevel_opacity + (1 - bevel_opacity) * 0.5, 0, 1)
+            
+            # Apply lighting to RGB
+            result_arr = arr.copy()
+            result_arr[:, :, :3] *= lighting[:, :, np.newaxis]
+            result = Image.fromarray(result_arr.astype(np.uint8))
+        except ImportError:
+            # Fallback: use PIL emboss filter
+            emboss_filter = ImageFilter.EMBOSS
+            embossed = result.filter(emboss_filter)
+            result = Image.blend(result, embossed, bevel_opacity * 0.5)
+    
+    return result
+
 def render_layer_image(layer, canvas_w, canvas_h):
     b64 = layer.get('image_data', '')
     if not b64:
@@ -211,12 +392,15 @@ def render_layer_image(layer, canvas_w, canvas_h):
     img = apply_transforms(img, layer.get('transforms', {}))
     img = apply_adjustments(img, layer.get('adjustments', {}))
     img = apply_filters(img, layer.get('filters', []))
+    img = apply_layer_styles(img, layer.get('styles', {}))
     return img
 
 def render_layer_solid(layer, canvas_w, canvas_h):
     c = layer.get('color', '#3a3a5c')
     r, g, b = int(c[1:3],16), int(c[3:5],16), int(c[5:7],16)
-    return Image.new('RGBA', (canvas_w, canvas_h), (r,g,b,255))
+    img = Image.new('RGBA', (canvas_w, canvas_h), (r,g,b,255))
+    img = apply_layer_styles(img, layer.get('styles', {}))
+    return img
 
 def render_layer_gradient(layer, canvas_w, canvas_h):
     import math
@@ -234,7 +418,9 @@ def render_layer_gradient(layer, canvas_w, canvas_h):
     arr[:,:,1] = np.round(g1 + t*(g2-g1)).astype(np.uint8)
     arr[:,:,2] = np.round(b1 + t*(b2-b1)).astype(np.uint8)
     arr[:,:,3] = 255
-    return Image.fromarray(arr, 'RGBA')
+    img = Image.fromarray(arr, 'RGBA')
+    img = apply_layer_styles(img, layer.get('styles', {}))
+    return img
 
 def render_layer_text(layer, canvas_w, canvas_h):
     img = Image.new('RGBA', (canvas_w, canvas_h), (0,0,0,0))
@@ -253,6 +439,7 @@ def render_layer_text(layer, canvas_w, canvas_h):
         except Exception:
             font = ImageFont.load_default()
     draw.text((tx, ty), text, font=font, fill=(r,g,b,255))
+    img = apply_layer_styles(img, layer.get('styles', {}))
     return img
 
 # ── Compositing engine ────────────────────────────────────────
@@ -407,6 +594,7 @@ def add_layer(pid):
         'filters':    [],
         'transforms': {'rotation':0,'flip_horizontal':False,'flip_vertical':False},
         'crop':       None,
+        'styles':     {},  # Layer styles (drop shadow, stroke, glow, bevel)
     }
 
     if ltype == 'image':
@@ -469,7 +657,7 @@ def update_layer(pid, lid):
     data = request.get_json() or {}
     for field in ['visible','opacity','blend_mode','name','x','y',
                   'display_w','display_h','display_rotation',
-                  'adjustments','filters','transforms','crop',
+                  'adjustments','filters','transforms','crop','styles',
                   'color','color1','color2','angle','text','font_size']:
         if field in data:
             layer[field] = data[field]

@@ -148,6 +148,14 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
 .adj-slider:hover::-webkit-slider-thumb{background:var(--accent);box-shadow:0 0 0 4px var(--accent2)}
 .adj-slider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--text);border:2px solid var(--bg1);cursor:pointer}
 
+/* Layer Styles */
+.style-group{background:var(--bg2);border-radius:var(--r);padding:8px;margin-bottom:8px;border:1px solid var(--border)}
+.style-header{display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:6px}
+.style-checkbox{width:16px;height:16px;cursor:pointer}
+.style-header label{font-size:11px;color:var(--text2);cursor:pointer;margin:0}
+.style-controls{display:none;padding-left:24px}
+.style-controls.show{display:block}
+
 /* Filter chips */
 .filter-chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
 .chip{

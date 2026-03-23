@@ -312,6 +312,134 @@
           </div>
           <button class="lp-btn-small" id="clearLayerFiltersBtn">✕ Effacer</button>
         </div>
+
+        <!-- Layer Styles -->
+        <div class="subsection-header" data-toggle="sec-layer-styles">Effets de calque <span class="chevron">›</span></div>
+        <div class="lp-section-body" id="sec-layer-styles" style="display:none">
+          <!-- Drop Shadow -->
+          <div class="style-group">
+            <div class="style-header">
+              <input type="checkbox" id="shadowEnabled" class="style-checkbox"/>
+              <label for="shadowEnabled">Ombre portée</label>
+            </div>
+            <div class="style-controls" id="shadowControls">
+              <div class="field-row">
+                <label class="field-label">Couleur</label>
+                <input type="color" id="shadowColor" class="color-pick" value="#000000"/>
+              </div>
+              <div class="slider-item">
+                <div class="slider-label"><span>Opacité</span><span class="sv" id="sv-shadowOpacity">50</span></div>
+                <input type="range" id="shadowOpacity" class="adj-slider" min="0" max="100" value="50"/>
+              </div>
+              <div class="slider-item">
+                <div class="slider-label"><span>Décalage</span><span class="sv" id="sv-shadowOffset">10</span></div>
+                <input type="range" id="shadowOffset" class="adj-slider" min="0" max="50" value="10"/>
+              </div>
+              <div class="slider-item">
+                <div class="slider-label"><span>Flou</span><span class="sv" id="sv-shadowBlur">10</span></div>
+                <input type="range" id="shadowBlur" class="adj-slider" min="0" max="50" value="10"/>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stroke -->
+          <div class="style-group">
+            <div class="style-header">
+              <input type="checkbox" id="strokeEnabled" class="style-checkbox"/>
+              <label for="strokeEnabled">Contour</label>
+            </div>
+            <div class="style-controls" id="strokeControls">
+              <div class="field-row">
+                <label class="field-label">Couleur</label>
+                <input type="color" id="strokeColor" class="color-pick" value="#000000"/>
+              </div>
+              <div class="slider-item">
+                <div class="slider-label"><span>Opacité</span><span class="sv" id="sv-strokeOpacity">100</span></div>
+                <input type="range" id="strokeOpacity" class="adj-slider" min="0" max="100" value="100"/>
+              </div>
+              <div class="slider-item">
+                <div class="slider-label"><span>Taille</span><span class="sv" id="sv-strokeSize">3</span></div>
+                <input type="range" id="strokeSize" class="adj-slider" min="1" max="20" value="3"/>
+              </div>
+              <div class="field-row">
+                <label class="field-label">Position</label>
+                <select id="strokePosition" class="lp-select">
+                  <option value="outside">Extérieur</option>
+                  <option value="inside">Intérieur</option>
+                  <option value="center">Centré</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Outer Glow -->
+          <div class="style-group">
+            <div class="style-header">
+              <input type="checkbox" id="outerGlowEnabled" class="style-checkbox"/>
+              <label for="outerGlowEnabled">Lueur externe</label>
+            </div>
+            <div class="style-controls" id="outerGlowControls">
+              <div class="field-row">
+                <label class="field-label">Couleur</label>
+                <input type="color" id="outerGlowColor" class="color-pick" value="#ffffff"/>
+              </div>
+              <div class="slider-item">
+                <div class="slider-label"><span>Opacité</span><span class="sv" id="sv-outerGlowOpacity">50</span></div>
+                <input type="range" id="outerGlowOpacity" class="adj-slider" min="0" max="100" value="50"/>
+              </div>
+              <div class="slider-item">
+                <div class="slider-label"><span>Taille</span><span class="sv" id="sv-outerGlowSize">10</span></div>
+                <input type="range" id="outerGlowSize" class="adj-slider" min="1" max="50" value="10"/>
+              </div>
+            </div>
+          </div>
+
+          <!-- Inner Glow -->
+          <div class="style-group">
+            <div class="style-header">
+              <input type="checkbox" id="innerGlowEnabled" class="style-checkbox"/>
+              <label for="innerGlowEnabled">Lueur interne</label>
+            </div>
+            <div class="style-controls" id="innerGlowControls">
+              <div class="field-row">
+                <label class="field-label">Couleur</label>
+                <input type="color" id="innerGlowColor" class="color-pick" value="#ffffff"/>
+              </div>
+              <div class="slider-item">
+                <div class="slider-label"><span>Opacité</span><span class="sv" id="sv-innerGlowOpacity">50</span></div>
+                <input type="range" id="innerGlowOpacity" class="adj-slider" min="0" max="100" value="50"/>
+              </div>
+              <div class="slider-item">
+                <div class="slider-label"><span>Taille</span><span class="sv" id="sv-innerGlowSize">10</span></div>
+                <input type="range" id="innerGlowSize" class="adj-slider" min="1" max="50" value="10"/>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bevel/Emboss -->
+          <div class="style-group">
+            <div class="style-header">
+              <input type="checkbox" id="bevelEnabled" class="style-checkbox"/>
+              <label for="bevelEnabled">Biseau</label>
+            </div>
+            <div class="style-controls" id="bevelControls">
+              <div class="slider-item">
+                <div class="slider-label"><span>Opacité</span><span class="sv" id="sv-bevelOpacity">50</span></div>
+                <input type="range" id="bevelOpacity" class="adj-slider" min="0" max="100" value="50"/>
+              </div>
+              <div class="slider-item">
+                <div class="slider-label"><span>Taille</span><span class="sv" id="sv-bevelSize">5</span></div>
+                <input type="range" id="bevelSize" class="adj-slider" min="1" max="20" value="5"/>
+              </div>
+              <div class="slider-item">
+                <div class="slider-label"><span>Angle</span><span class="sv" id="sv-bevelAngle">135</span></div>
+                <input type="range" id="bevelAngle" class="adj-slider" min="0" max="360" value="135"/>
+              </div>
+            </div>
+          </div>
+
+          <button class="lp-btn-small" id="resetLayerStylesBtn">↺ Réinitialiser effets</button>
+        </div>
       </div>
     </div>
 
