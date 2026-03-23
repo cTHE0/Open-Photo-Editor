@@ -748,9 +748,13 @@ $('applyCropBtn').addEventListener('click', async () => {
   const cr    = S.cropRect;
   const layer = S.layers.find(l => l.id === S.activeId);
   if (!layer) return;
+  
+  // Calculate crop relative to layer's displayed size
+  const layerX = layer.x || 0;
+  const layerY = layer.y || 0;
   const relCrop = {
-    x: Math.round(cr.x - (layer.x || 0)),
-    y: Math.round(cr.y - (layer.y || 0)),
+    x: Math.round(cr.x - layerX),
+    y: Math.round(cr.y - layerY),
     width:  Math.round(cr.w),
     height: Math.round(cr.h)
   };
