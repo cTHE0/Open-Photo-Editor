@@ -130,11 +130,19 @@ cwrap.addEventListener('drop', e => {
 // ══════════════════════════════════════════════════════════════
 // PROJECT  (guaranteed serial creation)
 // ══════════════════════════════════════════════════════════════
+
+// Promise resolver for project creation waiters
+let _projectReadyResolve = null;
+
 async function ensureProject(w, h) {
   if (S.projectId) return;
   if (S._creating) {
-    // Wait until creation finishes
-    await new Promise(res => { const iv = setInterval(() => { if (S.projectId) { clearInterval(iv); res(); } }, 30); });
+    // Wait until creation finishes using promise
+    await new Promise((resolve, reject) => {
+      _projectReadyResolve = resolve;
+      // Timeout after 5 seconds to prevent infinite wait
+      setTimeout(() => reject(new Error('Project creation timeout')), 5000);
+    });
     return;
   }
   await createProject(w, h);
@@ -161,6 +169,11 @@ async function createProject(w, h) {
     toast(`Projet ${S.canvasW}×${S.canvasH}`, 'success');
   } finally {
     S._creating = false;
+    // Notify any waiters that project is ready
+    if (_projectReadyResolve) {
+      _projectReadyResolve();
+      _projectReadyResolve = null;
+    }
   }
 }
 
